@@ -43,6 +43,7 @@ REGISTRY_PATH = Path(__file__).with_name("registry.txt")
 # meaningful alongside the scope's element count.
 _UNNORMALIZED_STATS = ("l1_norm", "l2_norm")
 _NORMALIZED_STATS = ("mean", "std", "third_moment", "fourth_moment")
+_PERCENTILE_STATS = ("p01", "p10", "p50", "p90", "p99")
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,11 @@ class Metric:
     def normalized(self) -> bool:
         """Whether the value is already divided by the scope's element count."""
 
-        return self.stat is None or self.stat in _NORMALIZED_STATS
+        return (
+            self.stat is None
+            or self.stat in _NORMALIZED_STATS
+            or self.stat in _PERCENTILE_STATS
+        )
 
 
 @dataclass(frozen=True)
@@ -115,7 +120,7 @@ def _diagnostic_metrics() -> tuple[Metric, ...]:
     appended but never inserted or reordered.
     """
 
-    stats = (*_UNNORMALIZED_STATS, *_NORMALIZED_STATS)
+    stats = (*_UNNORMALIZED_STATS, *_NORMALIZED_STATS, *_PERCENTILE_STATS)
     return tuple(
         Metric(base + offset, f"{family}.{stat}", family=family, stat=stat)
         for family, base in _DIAGNOSTIC_FAMILY_BASES
@@ -125,12 +130,20 @@ def _diagnostic_metrics() -> tuple[Metric, ...]:
 
 METRICS: tuple[Metric, ...] = (*_AXES_AND_SCALARS, *_diagnostic_metrics())
 
-# The diagnostic grid, derived from the registry rather than restated. A recipe
-# that iterates families x statistics is iterating exactly the ids that exist.
+# Diagnostic grid profiles derived from the registry rather than restated.
+# Existing recipes retain the six-statistic core; opt-in experiments can use
+# the extended profile without changing historical artifact layouts.
 DIAGNOSTIC_FAMILIES: tuple[str, ...] = tuple(
     family for family, _ in _DIAGNOSTIC_FAMILY_BASES
 )
-DIAGNOSTIC_STATS: tuple[str, ...] = (*_UNNORMALIZED_STATS, *_NORMALIZED_STATS)
+DIAGNOSTIC_CORE_STATS: tuple[str, ...] = (*_UNNORMALIZED_STATS, *_NORMALIZED_STATS)
+DIAGNOSTIC_PERCENTILE_STATS: tuple[str, ...] = _PERCENTILE_STATS
+DIAGNOSTIC_EXTENDED_STATS: tuple[str, ...] = (
+    *DIAGNOSTIC_CORE_STATS,
+    *DIAGNOSTIC_PERCENTILE_STATS,
+)
+# Compatibility name used by the original rectangular diagnostic protocol.
+DIAGNOSTIC_STATS: tuple[str, ...] = DIAGNOSTIC_CORE_STATS
 
 SCOPES: tuple[Scope, ...] = (
     Scope(1, "overall"),

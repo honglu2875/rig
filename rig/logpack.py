@@ -130,6 +130,13 @@ class Column:
         scope = self.scope
         name = metric.name if metric is not None else f"metric:{self.metric_id}"
         where = scope.name if scope is not None else f"scope:{self.scope_id}"
+        if (
+            scope is not None
+            and scope.name == "expert"
+            and self.layer >= 0
+            and self.index >= 0
+        ):
+            return f"block[{self.layer}]/expert[{self.index}]/{name}"
         if self.layer >= 0:
             where = f"{where}[{self.layer}]"
         if self.index >= 0:
@@ -317,7 +324,11 @@ class Log:
         raise KeyError(f"{name!r} is not an index axis")
 
     def index_of(
-        self, metric_name: str, scope_name: str = "overall", layer: int | None = None
+        self,
+        metric_name: str,
+        scope_name: str = "overall",
+        layer: int | None = None,
+        index: int | None = None,
     ) -> int | None:
         """Return the column position for a series, or None when absent.
 
@@ -327,22 +338,32 @@ class Log:
 
         metric = metrics.metric(metric_name)
         scope = metrics.scope(scope_name)
+        if scope.indexed and index is None:
+            raise ValueError(f"scope {scope_name!r} requires an index")
+        if not scope.indexed and index is not None:
+            raise ValueError(f"scope {scope_name!r} does not take an index")
         wanted = -1 if layer is None else layer
+        wanted_index = -1 if index is None else index
         for position, entry in enumerate(self.columns):
             if (
                 entry.metric_id == metric.id
                 and entry.scope_id == scope.id
                 and entry.layer == wanted
+                and entry.index == wanted_index
             ):
                 return position
         return None
 
     def series(
-        self, metric_name: str, scope_name: str = "overall", layer: int | None = None
+        self,
+        metric_name: str,
+        scope_name: str = "overall",
+        layer: int | None = None,
+        index: int | None = None,
     ) -> np.ndarray | None:
         """Return one column across every sample, or None when it was not recorded."""
 
-        position = self.index_of(metric_name, scope_name, layer)
+        position = self.index_of(metric_name, scope_name, layer, index)
         return None if position is None else self.values[:, position]
 
 

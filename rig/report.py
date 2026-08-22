@@ -92,7 +92,7 @@ _DIAGNOSTIC_REQUIRED = (
     "element_count",
 )
 _DIAGNOSTIC_SCOPES = frozenset(
-    {"overall", "embeddings", "unembedding", "block", "final_norm"}
+    {"overall", "embeddings", "unembedding", "block", "expert", "final_norm"}
 )
 _DIAGNOSTIC_FAMILIES = ("grad", "update", "param")
 _DIAGNOSTIC_STATS = (
@@ -102,6 +102,11 @@ _DIAGNOSTIC_STATS = (
     "std",
     "third_moment",
     "fourth_moment",
+    "p01",
+    "p10",
+    "p50",
+    "p90",
+    "p99",
 )
 _PRIMARY_TRAIN_METRICS = ("train_loss", "learning_rate")
 _LAYER_METRICS = (
@@ -515,14 +520,44 @@ def _check_diagnostic_scopes(log: logpack.Log) -> None:
                 "start at layer 0"
             )
 
+    expert = metrics_registry.scope("expert").id
+    if expert in layers_by_scope:
+        indexes_by_layer: dict[int, set[int]] = {}
+        for entry in log.columns:
+            if entry.scope_id == expert:
+                indexes_by_layer.setdefault(entry.layer, set()).add(entry.index)
+        block_layers = layers_by_scope.get(block, set())
+        if not set(indexes_by_layer) <= block_layers:
+            raise ReportError(
+                f"{DIAGNOSTICS_LOG_NAME} expert scopes must belong to a block"
+            )
+        for layer, indexes in indexes_by_layer.items():
+            ordered = sorted(indexes)
+            if ordered != list(range(len(ordered))):
+                raise ReportError(
+                    f"{DIAGNOSTICS_LOG_NAME} block {layer} expert scopes must be "
+                    "contiguous and start at expert 0"
+                )
+
     # The overall scope covers the whole model, so its element count has to be
-    # the sum of the disjoint scopes that partition it.
+    # the sum of the disjoint scopes that partition it. Expert scopes overlap
+    # their parent blocks and are intentionally excluded from this sum.
     overall = metrics_registry.scope("overall").id
-    counts: dict[tuple[int, int], int] = {}
+    partition_scopes = {
+        metrics_registry.scope(name).id
+        for name in ("embeddings", "unembedding", "block", "final_norm")
+    }
+    counts: dict[tuple[int, int, int], int] = {}
     for entry in log.columns:
-        counts.setdefault((entry.scope_id, entry.layer), entry.element_count)
-    total = counts.get((overall, -1))
-    parts = sum(value for (scope_id, _), value in counts.items() if scope_id != overall)
+        counts.setdefault(
+            (entry.scope_id, entry.layer, entry.index), entry.element_count
+        )
+    total = counts.get((overall, -1, -1))
+    parts = sum(
+        value
+        for (scope_id, _, _), value in counts.items()
+        if scope_id in partition_scopes
+    )
     if total is not None and parts and total != parts:
         raise ReportError(
             f"{DIAGNOSTICS_LOG_NAME} overall element_count disagrees with its "

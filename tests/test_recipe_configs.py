@@ -9,7 +9,12 @@ from rig.configfile import read_config_document
 
 
 ROOT = Path(__file__).parents[1]
-RECIPES = ("reference", "reference_duration", "reference_moe")
+RECIPES = {
+    "reference": 6,
+    "reference_duration": 6,
+    "reference_moe": 6,
+    "expert_load_moe": 7,
+}
 
 
 class StandaloneRecipeConfigTests(unittest.TestCase):
@@ -19,13 +24,13 @@ class StandaloneRecipeConfigTests(unittest.TestCase):
             "dev": "dev.yaml",
             "smoke": "smoke.yaml",
         }
-        for recipe in RECIPES:
+        for recipe, schema_version in RECIPES.items():
             for execution_type, filename in filenames.items():
                 with self.subTest(recipe=recipe, execution_type=execution_type):
                     document, _ = read_config_document(
                         ROOT / "recipes" / recipe / filename
                     )
-                    self.assertEqual(document["schema_version"], 6)
+                    self.assertEqual(document["schema_version"], schema_version)
                     self.assertEqual(document["execution_type"], execution_type)
                     self.assertEqual(
                         set(document),

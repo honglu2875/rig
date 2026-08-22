@@ -177,6 +177,22 @@ class DescriptorIsSufficientTests(unittest.TestCase):
                 self.assertEqual(int(parsed["layer"]), original.layer)
                 self.assertEqual(int(parsed["index"]), original.index)
 
+    def test_indexed_expert_series_use_the_nested_block_address(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / f"t{logpack.SUFFIX}"
+            self._write(path)
+            recorded = logpack.read_log(path)
+
+        self.assertEqual(
+            recorded.columns[3].describe(), "block[2]/expert[5]/router.load"
+        )
+        np.testing.assert_array_equal(
+            recorded.series("router.load", "expert", 2, index=5),
+            np.full(8, 0.125, np.float32),
+        )
+        with self.assertRaisesRegex(ValueError, "requires an index"):
+            recorded.series("router.load", "expert", 2)
+
     def test_it_reads_a_real_recorded_log(self) -> None:
         # A synthetic file can accidentally agree with a wrong reader; a file
         # a real run wrote cannot be tuned to.

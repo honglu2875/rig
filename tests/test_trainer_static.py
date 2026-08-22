@@ -1198,12 +1198,15 @@ class TrainerStaticTests(unittest.TestCase):
         values = np.asarray(trainer.diagnostic_values(params, gradients, after))
         metadata = trainer.diagnostic_scope_metadata(params)
         self.assertEqual(
-            metadata,
+            tuple(
+                (scope.scope, scope.layer, scope.index, scope.element_count)
+                for scope in metadata
+            ),
             (
-                ("overall", None, 5),
-                ("embeddings", None, 2),
-                ("block", 0, 2),
-                ("final_norm", None, 1),
+                ("overall", None, None, 5),
+                ("embeddings", None, None, 2),
+                ("block", 0, None, 2),
+                ("final_norm", None, None, 1),
             ),
         )
         flattened = np.concatenate(

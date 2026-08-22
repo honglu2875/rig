@@ -1,0 +1,126 @@
+# Standalone development configuration for recipes/expert_load_moe/train.py.
+schema_version: 7
+execution_type: dev
+family:
+  default_tier: 125m
+  default_context: 8k
+  contexts:
+    1k:
+      seq_len: 1024
+      reference_batch_size: 128
+      document_masking: false
+    8k:
+      seq_len: 8192
+      reference_batch_size: 16
+      document_masking: true
+  parameterization:
+    name: completep_fixed_tpp_v1
+    base_tier: 60m
+    depth_alpha: 1.0
+    init_std: 0.02
+    attention_scale: inverse_head_dim
+    embeddings: untied
+  tiers:
+    60m:
+      model:
+        layers: 12
+        heads: 6
+        d_model: 384
+        mlp_mult: 4
+        experts: 8
+        expert_top_k: 2
+        expert_mult: 2
+        router_aux_coefficient: 0.01
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: gelu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    125m:
+      model:
+        layers: 12
+        heads: 10
+        d_model: 640
+        mlp_mult: 4
+        experts: 8
+        expert_top_k: 2
+        expert_mult: 2
+        router_aux_coefficient: 0.01
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: gelu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    250m:
+      model:
+        layers: 16
+        heads: 14
+        d_model: 896
+        mlp_mult: 4
+        experts: 8
+        expert_top_k: 2
+        expert_mult: 2
+        router_aux_coefficient: 0.01
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: gelu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    500m:
+      model:
+        layers: 19
+        heads: 20
+        d_model: 1280
+        mlp_mult: 4
+        experts: 8
+        expert_top_k: 2
+        expert_mult: 2
+        router_aux_coefficient: 0.01
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: gelu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    1b:
+      model:
+        layers: 21
+        heads: 28
+        d_model: 1792
+        mlp_mult: 4
+        experts: 8
+        expert_top_k: 2
+        expert_mult: 2
+        router_aux_coefficient: 0.01
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: gelu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+
+run:
+  training:
+    duration:
+      tokens_per_parameter: 5.0
+    sampling: shuffled_epochs
+    dtype: bfloat16
+  kernels:
+    attention_backend: tpu_flash
+    loss_backend: tiled
+    vocab_tile_size: 2048
+  optimizer:
+    learning_rate: 0.00390625
+    min_lr_ratio: 0.1
+    warmup_ratio: 0.1
+    weight_decay: 0.1
+    adam_epsilon: 1.0e-8
+    beta1: 0.9
+    beta2: 0.95
+    grad_clip: 0.0
+    expert_load_scaling_mode: update
+    expert_load_scaling_strength: 0.5
+  evaluation:
+    final_predictions: 1048576
+    probe: null
+  logging:
+    diagnostics_every: 10
+    log_every: 10

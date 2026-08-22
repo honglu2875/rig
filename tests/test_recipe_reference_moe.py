@@ -561,7 +561,7 @@ class RouterLoggingTests(unittest.TestCase):
             self.assertEqual(len(log.columns), len(columns))
             self.assertEqual(len(log), steps)
             names = {c.describe() for c in log.columns}
-            self.assertIn("expert[2]#7/router.load", names)
+            self.assertIn("block[2]/expert[7]/router.load", names)
             self.assertIn("block[0]/router.entropy", names)
 
 

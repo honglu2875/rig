@@ -28,7 +28,8 @@ import jax
 import numpy as np
 
 from rig import logpack
-from rig.metrics import DIAGNOSTIC_FAMILIES, DIAGNOSTIC_STATS
+from rig.diagnostics import DiagnosticScopeMetadata
+from rig.metrics import DIAGNOSTIC_CORE_STATS, DIAGNOSTIC_FAMILIES
 from rig.mesh import local_device_get
 from rig.nn import flatten_arrays
 
@@ -175,7 +176,11 @@ def training_log_columns(
 
 
 def diagnostic_log_columns(
-    scope_metadata: Sequence[tuple[str, int | None, int]],
+    scope_metadata: Sequence[
+        DiagnosticScopeMetadata | tuple[str, int | None, int]
+    ],
+    *,
+    statistics: Sequence[str] = DIAGNOSTIC_CORE_STATS,
 ) -> tuple[logpack.Column, ...]:
     """Flatten the ``[scope, family, stat]`` grid into registry-addressed columns.
 
@@ -183,12 +188,27 @@ def diagnostic_log_columns(
     point flattens straight into a record with no per-value bookkeeping.
     """
 
-    return tuple(
-        logpack.column(f"{family}.{stat}", scope, layer, element_count=element_count)
-        for scope, layer, element_count in scope_metadata
-        for family in DIAGNOSTIC_FAMILIES
-        for stat in DIAGNOSTIC_STATS
-    )
+    if not statistics or len(statistics) != len(set(statistics)):
+        raise ValueError("diagnostic statistics must be nonempty and unique")
+    columns: list[logpack.Column] = []
+    for entry in scope_metadata:
+        metadata = (
+            entry
+            if isinstance(entry, DiagnosticScopeMetadata)
+            else DiagnosticScopeMetadata(entry[0], entry[1], None, entry[2])
+        )
+        columns.extend(
+            logpack.column(
+                f"{family}.{stat}",
+                metadata.scope,
+                metadata.layer,
+                element_count=metadata.element_count,
+                index=metadata.index,
+            )
+            for family in DIAGNOSTIC_FAMILIES
+            for stat in statistics
+        )
+    return tuple(columns)
 
 
 DIAGNOSTIC_FLUSH_POINTS = 64
@@ -305,11 +325,14 @@ def write_training_log(
 def write_diagnostics_log(
     output_dir: Path,
     points: Sequence[DiagnosticPoint],
-    scope_metadata: Sequence[tuple[str, int | None, int]],
+    scope_metadata: Sequence[
+        DiagnosticScopeMetadata | tuple[str, int | None, int]
+    ],
     *,
     tokens_per_step: int,
     final_step: int,
     flops_per_token: int,
+    statistics: Sequence[str] = DIAGNOSTIC_CORE_STATS,
 ) -> None:
     """Atomically persist the sparse optimizer diagnostics."""
 
@@ -320,7 +343,7 @@ def write_diagnostics_log(
     expected_shape = (
         len(scope_metadata),
         len(DIAGNOSTIC_FAMILIES),
-        len(DIAGNOSTIC_STATS),
+        len(statistics),
     )
     if points[-1].step != final_step:
         raise ValueError("diagnostic history must include the final optimizer step")
@@ -330,7 +353,7 @@ def write_diagnostics_log(
     previous_step = 0
     with logpack.LogWriter(
         temporary,
-        diagnostic_log_columns(scope_metadata),
+        diagnostic_log_columns(scope_metadata, statistics=statistics),
         tokens_per_step=tokens_per_step,
         flops_per_token=float(flops_per_token),
     ) as writer:

@@ -10,6 +10,8 @@ import re
 import tempfile
 import unittest
 
+import numpy as np
+
 from rig import logpack
 from rig.report import (
     DIAGNOSTICS_LOG_NAME,
@@ -21,6 +23,7 @@ from rig.report import (
     _diagnostic_metric,
     _lttb,
     _compact,
+    _check_diagnostic_scopes,
     _subsample_indices,
     build_report,
     build_study_browser,
@@ -28,6 +31,28 @@ from rig.report import (
 
 
 class ReportTests(unittest.TestCase):
+    def test_nested_expert_diagnostics_do_not_double_count_parent_blocks(self) -> None:
+        columns = (
+            logpack.column("grad.l2_norm", "overall", element_count=8),
+            logpack.column("grad.l2_norm", "embeddings", element_count=2),
+            logpack.column("grad.l2_norm", "unembedding", element_count=2),
+            logpack.column("grad.l2_norm", "block", 0, element_count=3),
+            logpack.column("grad.l2_norm", "expert", 0, element_count=2, index=0),
+            logpack.column("grad.l2_norm", "expert", 0, element_count=2, index=1),
+            logpack.column("grad.l2_norm", "final_norm", element_count=1),
+        )
+        log = logpack.Log(
+            columns=columns,
+            steps=np.asarray([1], np.int32),
+            values=np.zeros((1, len(columns)), np.float32),
+            tokens_per_step=1,
+            flops_per_token=1.0,
+        )
+
+        # Expert counts overlap their parent block. Only the disjoint model
+        # scopes participate in the overall element-count identity.
+        _check_diagnostic_scopes(log)
+
     def test_every_successful_run_is_plotted_whatever_its_profile_or_loss(self) -> None:
         # The report once admitted only official runs at the historical
         # 624,984,064-token budget with loss <= 3.76, which excluded the entire
@@ -382,8 +407,6 @@ class ReportTests(unittest.TestCase):
         self.assertIn("duplicate entries", summary.skipped[run.name])
 
     def test_checkpoint_stats_group_parameter_arrays_by_logical_layer(self) -> None:
-        import numpy as np
-
         with tempfile.TemporaryDirectory() as directory:
             checkpoint = Path(directory) / "checkpoint.npz"
             np.savez(

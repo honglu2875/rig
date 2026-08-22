@@ -92,7 +92,17 @@ class MetricsRegistryTests(unittest.TestCase):
         # The report needs the distinction to compare scopes of different size.
         self.assertFalse(metrics.metric("param.l1_norm").normalized)
         self.assertFalse(metrics.metric("param.l2_norm").normalized)
-        for stat in ("mean", "std", "third_moment", "fourth_moment"):
+        for stat in (
+            "mean",
+            "std",
+            "third_moment",
+            "fourth_moment",
+            "p01",
+            "p10",
+            "p50",
+            "p90",
+            "p99",
+        ):
             with self.subTest(stat=stat):
                 self.assertTrue(metrics.metric(f"param.{stat}").normalized)
         self.assertTrue(metrics.metric("train_loss").normalized)
