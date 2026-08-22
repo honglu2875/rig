@@ -53,6 +53,66 @@ class CliTests(unittest.TestCase):
             with self.subTest(removed=removed), self.assertRaises(SystemExit):
                 parser.parse_args(["run", "reference", removed, "1"])
 
+    def test_run_and_profile_accept_recipe_arguments_only_after_boundary(self) -> None:
+        parser = cli.build_parser()
+        invocations = (
+            ["run", "variant", "--profile", "dev"],
+            ["profile", "variant", "--output-dir", "profiles/test"],
+        )
+        for public in invocations:
+            with self.subTest(command=public[0]):
+                args = cli._parse_arguments(
+                    parser,
+                    [
+                        *public,
+                        "--",
+                        "--variant-mode",
+                        "fast",
+                        "--variant-strength=0.5",
+                    ],
+                )
+                self.assertEqual(
+                    args.recipe_args,
+                    ("--variant-mode", "fast", "--variant-strength=0.5"),
+                )
+                self.assertEqual(
+                    cli._recipe_specific_trainer_args(args), list(args.recipe_args)
+                )
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["run", "variant", "--variant-mode", "fast"])
+        with self.assertRaises(SystemExit):
+            cli._parse_arguments(parser, ["run", "variant", "--"])
+        for flag in ("--seed", "--tier", "--train-data", "--xprof-dir"):
+            with self.subTest(flag=flag), self.assertRaisesRegex(
+                ConfigError, f"harness-managed {flag}"
+            ):
+                cli._recipe_specific_trainer_args(
+                    SimpleNamespace(recipe_args=(f"{flag}=value",))
+                )
+
+    def test_recipe_help_uses_the_recipe_parser_without_preparing_a_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipe = root / "recipes" / "variant"
+            recipe.mkdir(parents=True)
+            trainer = recipe / "train.py"
+            trainer.write_text("pass\n", encoding="utf-8")
+            (recipe / "dev.yaml").write_text("schema_version: 1\n", encoding="utf-8")
+            completed = SimpleNamespace(returncode=0)
+            with (
+                patch("rig.cli.repo_root", return_value=root),
+                patch("rig.cli.load_config") as load_config,
+                patch("rig.cli.subprocess.run", return_value=completed) as run,
+            ):
+                self.assertEqual(
+                    cli.main(["run", "variant", "--", "--help"]), 0
+                )
+
+            load_config.assert_not_called()
+            self.assertEqual(run.call_args.args[0][-2:], [str(trainer), "--help"])
+            self.assertEqual(run.call_args.kwargs["cwd"], recipe)
+
     def test_run_passes_profile_as_harness_state_not_trainer_passthrough(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -90,7 +150,8 @@ class CliTests(unittest.TestCase):
                 checkpoint_policy="none",
                 color="never",
             )
-            args = cli.build_parser().parse_args(
+            args = cli._parse_arguments(
+                cli.build_parser(),
                 [
                     "run",
                     "variant",
@@ -103,6 +164,9 @@ class CliTests(unittest.TestCase):
                     "--name",
                     "profile-boundary",
                     "--skip-data-check",
+                    "--",
+                    "--variant-mode",
+                    "fast",
                 ]
             )
             outcome = SimpleNamespace(
@@ -138,6 +202,8 @@ class CliTests(unittest.TestCase):
             self.assertNotIn("--profile", run_config.trainer_args)
             self.assertIn("--tier", run_config.trainer_args)
             self.assertIn("--batch-size", run_config.trainer_args)
+            self.assertIn("--variant-mode", plan_arguments)
+            self.assertIn("--variant-mode", run_config.trainer_args)
             self.assertEqual(
                 run_config.trainer_args[
                     run_config.trainer_args.index("--train-data") + 1
@@ -576,7 +642,8 @@ class CliTests(unittest.TestCase):
                 train_tokens=100,
                 validation_tokens=20,
             )
-            args = cli.build_parser().parse_args(
+            args = cli._parse_arguments(
+                cli.build_parser(),
                 [
                     "profile",
                     "variant",
@@ -584,6 +651,9 @@ class CliTests(unittest.TestCase):
                     "profiles/test",
                     "--stop-after-step",
                     "20",
+                    "--",
+                    "--variant-mode",
+                    "trace",
                 ]
             )
             with (
@@ -595,7 +665,7 @@ class CliTests(unittest.TestCase):
                         payload={"stop_after_step": 20, "schedule_steps": 200},
                         sha256="a" * 64,
                     ),
-                ),
+                ) as resolve,
                 patch("rig.cli.verify_dataset", return_value=prepared),
                 patch("rig.cli._probe_configured_cluster", return_value=inventory),
                 patch("rig.cli.sync_workspace") as sync,
@@ -608,8 +678,10 @@ class CliTests(unittest.TestCase):
             self.assertIn("RIG_DISTRIBUTED=1", remote)
             self.assertIn("RIG_CONTROLLER_HOSTNAME=slice-w-0", remote)
             self.assertIn("--profile dev", remote)
+            self.assertIn("--variant-mode trace", remote)
             self.assertIn("--xprof-dir", remote)
             self.assertIn("profiles/test/xprof", remote)
+            self.assertIn("--variant-mode", resolve.call_args.kwargs["arguments"])
             sync.assert_called_once()
 
     def test_report_has_no_admission_knobs(self) -> None:

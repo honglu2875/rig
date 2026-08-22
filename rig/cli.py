@@ -32,6 +32,7 @@ from .harness import (
 )
 from .cohort import CohortError, build_cohort, validate_cohort
 from .plan import RecipePlan, resolve_recipe_plan
+from .recipe_args import RIG_MANAGED_RECIPE_FLAGS
 from .harness.cluster import (
     ClusterError,
     ClusterInventory,
@@ -128,6 +129,8 @@ _CLUSTER_WORKER_ENV = "RIG_CLUSTER_WORKER"
 _CONTROLLER_HOST_ENV = "RIG_CONTROLLER_HOSTNAME"
 _DISTRIBUTED_ENV = "RIG_DISTRIBUTED"
 _PROCESS_COUNT_ENV = "RIG_PROCESS_COUNT"
+_RECIPE_ARGUMENT_COMMANDS = frozenset({"run", "profile"})
+_RECIPE_HELP_ARGUMENTS = frozenset({("-h",), ("--help",)})
 
 
 class Style:
@@ -175,8 +178,13 @@ class Style:
 def main(argv: Iterable[str] | None = None) -> int:
     parser = build_parser()
     arguments = list(argv) if argv is not None else sys.argv[1:]
-    args = parser.parse_args(arguments)
+    args = _parse_arguments(parser, arguments)
     try:
+        if (
+            args.command in _RECIPE_ARGUMENT_COMMANDS
+            and args.recipe_args in _RECIPE_HELP_ARGUMENTS
+        ):
+            return command_recipe_help(args)
         if args.command == "prepare":
             return command_prepare(args)
         if args.command == "doctor":
@@ -210,6 +218,32 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"\n  {style.text('error:', 'red', 'bold')} {exc}\n", file=sys.stderr)
         return 1
     return 0
+
+
+def _parse_arguments(
+    parser: argparse.ArgumentParser,
+    arguments: Sequence[str],
+) -> argparse.Namespace:
+    """Parse the public CLI and isolate an explicit recipe-local ``--`` tail."""
+
+    public_arguments = list(arguments)
+    recipe_arguments: tuple[str, ...] = ()
+    if (
+        public_arguments
+        and public_arguments[0] in _RECIPE_ARGUMENT_COMMANDS
+        and "--" in public_arguments
+    ):
+        boundary = public_arguments.index("--")
+        recipe_arguments = tuple(public_arguments[boundary + 1 :])
+        if not recipe_arguments:
+            parser.error(
+                f"rig {public_arguments[0]} -- must be followed by recipe-local arguments"
+            )
+        public_arguments = public_arguments[:boundary]
+    args = parser.parse_args(public_arguments)
+    if args.command in _RECIPE_ARGUMENT_COMMANDS:
+        args.recipe_args = recipe_arguments
+    return args
 
 
 def _work_runs_elsewhere(config: LocalConfig) -> bool:
@@ -487,6 +521,39 @@ def _scientific_trainer_args(args: argparse.Namespace) -> list[str]:
     return result
 
 
+def _recipe_specific_trainer_args(args: argparse.Namespace) -> list[str]:
+    """Validate and return arguments after the explicit recipe boundary."""
+
+    result = [str(value) for value in getattr(args, "recipe_args", ())]
+    if any(argument in {"-h", "--help"} for argument in result):
+        raise ConfigError("recipe --help must be requested alone after --")
+    for argument in result:
+        flag = argument.split("=", 1)[0]
+        if flag in RIG_MANAGED_RECIPE_FLAGS:
+            raise ConfigError(
+                f"recipe-local arguments may not override harness-managed {flag}"
+            )
+        if argument == "--":
+            raise ConfigError("recipe-local arguments cannot contain another --")
+    return result
+
+
+def command_recipe_help(args: argparse.Namespace) -> int:
+    """Show the selected recipe's own argument surface without preparing a run."""
+
+    root = repo_root()
+    profile = args.profile or "dev"
+    recipe_dir, trainer = _recipe_entry(root, args.recipe, profile)
+    completed = subprocess.run(
+        [sys.executable, str(trainer), "--help"],
+        cwd=recipe_dir,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ConfigError(f"recipe help exited with status {completed.returncode}")
+    return 0
+
+
 def command_run(args: argparse.Namespace) -> int:
     config = load_config(cluster=getattr(args, "cluster", None))
     root = repo_root()
@@ -502,6 +569,7 @@ def command_run(args: argparse.Namespace) -> int:
     )
     recipe_dir, trainer = _recipe_entry(root, args.recipe, profile)
     scientific_args = _scientific_trainer_args(args)
+    recipe_args = _recipe_specific_trainer_args(args)
     python_executable = root / ".venv" / "bin" / "python"
     style.heading("Resolving recipe plan")
     plan = resolve_recipe_plan(
@@ -511,6 +579,7 @@ def command_run(args: argparse.Namespace) -> int:
             "--profile",
             profile,
             *scientific_args,
+            *recipe_args,
         ),
         cwd=recipe_dir,
     )
@@ -591,6 +660,7 @@ def command_run(args: argparse.Namespace) -> int:
     )
     trainer_args = [
         *scientific_args,
+        *recipe_args,
         "--data-format",
         "llmc",
         "--dataset-id",
@@ -738,6 +808,7 @@ def command_profile(args: argparse.Namespace) -> int:
     style = Style(color)
     recipe_dir, trainer = _recipe_entry(root, args.recipe, profile)
     scientific_args = _scientific_trainer_args(args)
+    recipe_args = _recipe_specific_trainer_args(args)
     python_executable = root / ".venv" / "bin" / "python"
     plan = resolve_recipe_plan(
         python_executable=python_executable,
@@ -746,6 +817,7 @@ def command_profile(args: argparse.Namespace) -> int:
             "--profile",
             profile,
             *scientific_args,
+            *recipe_args,
             "--diagnostic-mode",
         ),
         cwd=recipe_dir,
@@ -786,6 +858,7 @@ def command_profile(args: argparse.Namespace) -> int:
         "--profile",
         profile,
         *scientific_args,
+        *recipe_args,
         "--data-format",
         "llmc",
         "--dataset-id",

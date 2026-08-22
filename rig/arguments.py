@@ -1,8 +1,10 @@
 """The public ``rig`` command-line grammar.
 
 Keeping argument declaration separate from command execution makes the public
-surface reviewable as one small, side-effect-free module.  Unknown options are
-rejected here; commands never forward an untyped tail to a recipe.
+surface reviewable as one small, side-effect-free module. Unknown options are
+rejected here unless ``rig run`` or ``rig profile`` places them after an
+explicit ``--`` recipe boundary; command execution validates that tail before
+forwarding it.
 """
 
 from __future__ import annotations
@@ -16,6 +18,10 @@ from .data_routing import dataset_names
 PROFILES = ("smoke", "dev", "official")
 CHECKPOINT_POLICIES = ("always", "qualifying", "none")
 COLORS = ("auto", "always", "never")
+_RECIPE_ARGUMENT_EPILOG = (
+    "Recipe-local options may follow an explicit boundary, for example: "
+    "rig run my_recipe --profile dev -- --my-option value"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -130,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
         "run",
         help="execute, validate, and record one recipe",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=_RECIPE_ARGUMENT_EPILOG,
     )
     run.add_argument("recipe", help="folder name beneath recipes/")
     run.add_argument("--profile", choices=PROFILES)
@@ -180,6 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
         "profile",
         help="capture a bounded XProf trace from a distributed recipe",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=_RECIPE_ARGUMENT_EPILOG,
     )
     profile.add_argument(
         "recipe", nargs="?", default="reference", help="folder name beneath recipes/"

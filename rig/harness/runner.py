@@ -24,6 +24,7 @@ from typing import Any, BinaryIO, Callable, TextIO
 from ..cohort import validate_cohort
 from ..configfile import profile_config_filename
 from ..plan import RecipePlan, validate_recipe_plan
+from ..recipe_args import RUNNER_MANAGED_FLAGS
 from .cluster import (
     build_distributed_launch_command,
     fetch_run_artifacts,
@@ -42,14 +43,6 @@ from .validation import (
 
 _RECIPE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_RESERVED_PASSTHROUGH_FLAGS = (
-    "--output-dir",
-    "--seed",
-    "--profile",
-    "--omit-checkpoint",
-)
-
-
 def run_recipe(config: RunConfig) -> RunOutcome:
     """Run, validate, record, and apply checkpoint retention for one recipe.
 
@@ -614,7 +607,7 @@ def _validate_config(
         rendered = str(argument)
         if "\x00" in rendered:
             raise ConfigurationError("trainer arguments may not contain NUL bytes")
-        for flag in _RESERVED_PASSTHROUGH_FLAGS:
+        for flag in RUNNER_MANAGED_FLAGS:
             if rendered == flag or rendered.startswith(flag + "="):
                 raise ConfigurationError(
                     f"trainer arguments may not override reserved flag {flag}"

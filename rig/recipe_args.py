@@ -19,6 +19,49 @@ from rig.arguments import COLORS, positive_int
 StandardExecutionType = Literal["smoke", "dev", "official"]
 
 
+# ``run_recipe`` injects these itself and must reject duplicate values from any
+# caller supplying ``RunConfig.trainer_args``. Keep this set beside the helpers
+# that declare the corresponding trainer-side protocol rather than restating it
+# in the process runner.
+RUNNER_MANAGED_FLAGS = frozenset(
+    {
+        "--output-dir",
+        "--seed",
+        "--profile",
+        "--omit-checkpoint",
+    }
+)
+
+# ``rig run`` and ``rig profile`` own these protocol and common-research flags
+# before their explicit ``--`` boundary. A recipe may define every other flag
+# locally, but allowing its opaque tail to repeat one of these would make plan
+# resolution and the actual invocation order-dependent.
+RIG_MANAGED_RECIPE_FLAGS = RUNNER_MANAGED_FLAGS | frozenset(
+    {
+        "--print-plan",
+        "--tier",
+        "--context",
+        "--tokens-per-parameter",
+        "--base-learning-rate",
+        "--batch-size",
+        "--stop-after-step",
+        "--train-data",
+        "--val-data",
+        "--data-dtype",
+        "--data-format",
+        "--dataset-id",
+        "--tokenizer-id",
+        "--downstream-manifest",
+        "--downstream-root",
+        "--color",
+        "--diagnostic-mode",
+        "--xprof-dir",
+        "--xprof-start-step",
+        "--xprof-steps",
+    }
+)
+
+
 def new_recipe_parser(*, description: str) -> argparse.ArgumentParser:
     """Create the common strict parser shell without adding any arguments."""
 
@@ -195,6 +238,8 @@ def validate_standard_reporting_arguments(args: argparse.Namespace) -> None:
 
 
 __all__ = (
+    "RIG_MANAGED_RECIPE_FLAGS",
+    "RUNNER_MANAGED_FLAGS",
     "StandardExecutionType",
     "add_standard_config_arguments",
     "add_standard_data_arguments",
