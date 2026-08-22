@@ -14,6 +14,7 @@ RECIPES = {
     "reference_duration": 6,
     "reference_moe": 6,
     "expert_load_moe": 7,
+    "weight_decay_moe": 6,
 }
 
 
