@@ -1616,8 +1616,25 @@ def _study_run_name(result: Mapping[str, Any]) -> str:
         if model.get("parameterization") == "completedp_duration_v1"
         else ""
     )
+    load_scaling = ""
+    scaling = (result.get("implementation") or {}).get("expert_load_scaling")
+    if scaling is not None:
+        if not isinstance(scaling, Mapping):
+            return ""
+        mode = scaling.get("mode")
+        strength = scaling.get("strength")
+        if (
+            mode not in {"gradient", "update"}
+            or isinstance(strength, bool)
+            or not isinstance(strength, (int, float))
+            or not math.isfinite(strength)
+            or not 0 <= strength <= 1
+        ):
+            return ""
+        compact_strength = format(strength, ".12g").replace(".", "p")
+        load_scaling = f"-load-{mode}-c{compact_strength}"
     return (
-        f"{tier}{routed}{duration}-{tpp}tpp-bs{batch}-lr2e{exponent}"
+        f"{tier}{routed}{duration}{load_scaling}-{tpp}tpp-bs{batch}-lr2e{exponent}"
         f"-s{result.get('seed')}"
     )
 
@@ -1652,6 +1669,7 @@ def export_study(
                 records[entry.get("run_id")] = entry
 
     exported = 0
+    exported_names: dict[str, str] = {}
     for run in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
         result_path = run / "result.json"
         if not result_path.is_file():
@@ -1662,6 +1680,13 @@ def export_study(
         if result.get("status") != "ok":
             continue
         name = _study_run_name(result) or run.name
+        previous = exported_names.get(name)
+        if previous is not None:
+            raise ReportError(
+                f"study run name {name!r} collides for {previous!r} and "
+                f"{run.name!r}"
+            )
+        exported_names[name] = run.name
         folder = destination / name
         folder.mkdir(parents=True, exist_ok=True)
         for artifact in (
