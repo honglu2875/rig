@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 365 runs across fourteen studies, laid out as `<study>/<run-name>/`, at full
+— 370 runs across fifteen studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -49,6 +49,7 @@ by-product:
 | moe-lr-sweep-8k | 1,440 | 8 | 7.2 MB |
 | seed-variance | 1,440 | — | 8.4 MB |
 | moe-ablations | 480 bins | — | 0.07 MB |
+| expert-load-scaling | exact endpoints | — | 0.02 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -79,6 +80,11 @@ trajectories are the auxiliary-coefficient LM-loss curves: after subtracting
 the logged auxiliary term, each is averaged into 480 equal-width FLOP bins.
 The first 10% warmup region is omitted from that one chart to resolve the late
 separation. The 72 KiB page uses inline SVG and no runtime JavaScript or fetch.
+
+`expert-load-scaling.html` is another static findings report. It uses exact
+validation endpoints and permutation-invariant reductions of the per-expert
+diagnostics. The 19 KiB page uses inline SVG and no runtime JavaScript or fetch;
+the study browser carries the complete trajectories separately.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -138,6 +144,9 @@ Both MoE ablation studies are also TPU v4 at 4 processes and 16 chips. The
 no-bias comparisons are paired within that topology; every coefficient point
 uses the same topology and seed.
 
+The expert-load scaling study is likewise entirely TPU v4 at 4 processes and
+16 chips. Its baseline and four interventions use the same seed and topology.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -153,6 +162,7 @@ uses the same topology and seed.
 | [seed-variance](seed-variance.html) | 63 | 60M/125M | seed at a fixed MoE recipe | [`seed-variance-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/seed-variance-60M), [`seed-variance-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/seed-variance-125M) |
 | [duration-ablation](duration-ablation.md) | 42 | 60M/125M | fixed-TPP reference vs cross-horizon duration scaling | [`duration-ablation-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/duration-ablation-60M), [`duration-ablation-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/duration-ablation-125M) |
 | [moe-ablations](moe-ablations.html) | 23 | 60M/125M/250M | learned biases; router auxiliary-loss coefficient | [`moe-no-bias`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-no-bias), [`moe-router-aux-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-router-aux-125M) |
+| [expert-load-scaling](expert-load-scaling.html) | 5 | 125M | per-expert gradient/update scaling by current load | [`moe-expert-load-scaling-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-expert-load-scaling-125M) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -496,6 +506,37 @@ rig run reference_moe --context 8k --cluster v4-32 --profile dev \
   --tier 125m --tokens-per-parameter 5 --batch-size 16 \
   --base-learning-rate 0.00390625 --seed 1350 \
   --checkpoint-policy none --name "125m-router-aux-<coefficient>-s1350"
+```
+
+## expert-load-scaling.html
+
+Five matched seed-1350 runs at 125M and 5 TPP compare the unchanged
+coefficient-0.01 MoE baseline with a load factor applied either before Adam's
+moments or to the normalized update. The factor for an expert is
+`1 + c * (sqrt(8 * current_load) - 1)` at strengths 0.5 and 1.
+
+The static [findings report](expert-load-scaling.html) shows the exact
+validation endpoints and two permutation-invariant mechanism summaries.
+Gradient scaling is nearly canceled by Adam: the busiest/idlest actual-update
+ratio stays at 1.00 and `c=0.5` ties baseline within 0.00030 nats. Direct update
+scaling survives (ratio 1.19–1.43) but finishes 0.011–0.021 nats worse. This is
+one seed, so it is enough to reject the current rule, not to estimate a precise
+effect size.
+
+The intervention commit is `fb0bde826f5a68372d9898d3113e1eeb324b5e5b`:
+
+```bash
+for mode in gradient update; do
+  for strength in 0.5 1.0; do
+    rig run expert_load_moe --context 8k --cluster v4-32 --profile dev \
+      --tier 125m --tokens-per-parameter 5 --batch-size 16 \
+      --base-learning-rate 0.00390625 --seed 1350 \
+      --checkpoint-policy none \
+      --name "125m-load-${mode}-c${strength}-s1350" -- \
+      --expert-load-scaling-mode "$mode" \
+      --expert-load-scaling-strength "$strength"
+  done
+done
 ```
 
 ## transfer-charts.html

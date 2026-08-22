@@ -758,6 +758,56 @@ class StudyExportTests(unittest.TestCase):
             ],
         )
 
+    def test_expert_load_interventions_have_distinct_archive_names(self) -> None:
+        """Mode and strength are scientific coordinates, not launch trivia."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            for run, mode, strength in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                ("gradient", "update"),
+                (0.5, 1.0),
+                strict=True,
+            ):
+                payload = json.loads(
+                    (run / "result.json").read_text(encoding="utf-8")
+                )
+                payload["seed"] = 1350
+                payload["metrics"]["experts"] = 8
+                payload["implementation"] = {
+                    "expert_load_scaling": {"mode": mode, "strength": strength}
+                }
+                (run / "result.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(summary["runs"], 2)
+        self.assertEqual(
+            folders,
+            [
+                "60m-moe-load-gradient-c0p5-5tpp-bs1-lr2e-8-s1350",
+                "60m-moe-load-update-c1-5tpp-bs1-lr2e-8-s1350",
+            ],
+        )
+
+    def test_duplicate_archive_names_fail_instead_of_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            second = sorted(p for p in runs.iterdir() if p.is_dir())[1]
+            payload = json.loads((second / "result.json").read_text(encoding="utf-8"))
+            payload["seed"] = 1337
+            (second / "result.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(ReportError, "collides"):
+                export_study(runs, root / "out", "demo")
+
     def test_it_falls_back_to_the_run_id_when_it_cannot_name_a_run(self) -> None:
         """A run missing its tier or learning rate is still worth exporting.
 
