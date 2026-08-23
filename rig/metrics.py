@@ -108,6 +108,12 @@ _AXES_AND_SCALARS = (
     # Root-mean-square router logit. Grows without bound when nothing holds it
     # down, and a collapsing router shows it here before the loss moves.
     Metric(13, "router.logit_rms"),
+    # Gumbel-local MoE optimization. All four can be recorded per block; the
+    # latter three are the scale statistics that define its local geometry.
+    Metric(14, "moe.local_loss"),
+    Metric(15, "moe.input_rms"),
+    Metric(16, "moe.output_rms"),
+    Metric(17, "moe.output_gradient_rms"),
 )
 
 _DIAGNOSTIC_FAMILY_BASES = (("param", 100), ("grad", 200), ("update", 300))
