@@ -5,7 +5,7 @@ recipe-local `--weight-decay` override. Omitting the option preserves the YAML
 default of `0.1`; the override changes the base AdamW coefficient before the
 existing Complete(d)P tensor and token-horizon multipliers are applied.
 
-## Study contract
+## Initial study contract
 
 | coordinate | values |
 |---|---|
@@ -20,6 +20,14 @@ existing Complete(d)P tensor and token-horizon multipliers are applied.
 The grid contains 24 fresh runs. In particular, the `0.1` controls are rerun
 under the same commit and logging schema rather than imported from an older
 study.
+
+### 125M upper-decay extension
+
+The initial grid found that `0.3` improved 125M validation loss for all three
+seeds and was still the best value at the upper boundary. A second phase keeps
+the 125M setup unchanged and evaluates base weight decay `0.4`, `0.5`, `0.6`,
+and `0.8`, again at seeds 1337–1339. These 12 fresh runs reuse the initial
+`0.3` cell as their lower boundary rather than rerunning it.
 
 ## Inherited MoE design
 
