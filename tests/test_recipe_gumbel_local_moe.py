@@ -51,7 +51,10 @@ def _resolved_smoke(*overrides: str):
 
 class ConfigurationTests(unittest.TestCase):
     def test_local_steps_default_to_two_and_zero_is_explicit(self) -> None:
-        self.assertEqual(_resolved_smoke().local_moe_steps, 2)
+        from rig.plan import validate_recipe_plan
+
+        default = _resolved_smoke()
+        self.assertEqual(default.local_moe_steps, 2)
         self.assertEqual(
             _resolved_smoke("--local-moe-steps", "0").local_moe_steps,
             0,
@@ -60,6 +63,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(
             trainer.build_parser().parse_args([]).output_dir,
             Path("runs/gumbel_local_moe"),
+        )
+        validate_recipe_plan(trainer.resolved_plan_metadata(default))
+        self.assertEqual(
+            trainer.experiment_config_metadata(default)["resolved"]["optimizer"][
+                "local_moe_steps"
+            ],
+            2,
         )
 
     def test_local_steps_reject_negative_values(self) -> None:
