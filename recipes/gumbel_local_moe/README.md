@@ -42,6 +42,23 @@ Training logs add four per-block series when the treatment is enabled:
 `moe.output_gradient_rms`. The recorded local loss is the objective immediately
 before the final local update in that global step.
 
+## First study grid
+
+The first mechanism study is fixed before its full runs. Every arm uses the
+125M tier, 8k context, 5 TPP, global batch 16, base LR `0.00390625`, the
+FineWeb-8B train/validation contract, the v4-32 cluster, and no checkpoint.
+`K=2` is the primary treatment; `K=1` and `K=4` only test step-count shape.
+
+| local steps `K` | seeds | role |
+|---:|---|---|
+| 0 | 1350, 1369, 1388 | exact `reference_moe` update baseline |
+| 1 | 1350 | lower-work mechanism probe |
+| 2 | 1350, 1369, 1388 | primary treatment |
+| 4 | 1350 | higher-work mechanism probe |
+
+All arms run the complete 4,709-step schedule. The grid is not expanded based
+on intermediate losses; further work requires a new declared study.
+
 | | `reference` | this fork's MoE baseline |
 |---|---|---|
 | context presets | `1k` default, `8k` optional | same presets, `8k` default |
