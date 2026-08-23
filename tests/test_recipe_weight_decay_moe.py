@@ -86,7 +86,16 @@ class ConfigurationTests(unittest.TestCase):
         document, digest = trainer.load_experiment_config("dev")
 
         for tier, expected_steps in (("60m", 2286), ("125m", 4709)):
-            for weight_decay in ("0", "0.03", "0.1", "0.3"):
+            for weight_decay in (
+                "0",
+                "0.03",
+                "0.1",
+                "0.3",
+                "0.4",
+                "0.5",
+                "0.6",
+                "0.8",
+            ):
                 with self.subTest(tier=tier, weight_decay=weight_decay):
                     args = parser.parse_args(
                         [
