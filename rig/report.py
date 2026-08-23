@@ -1586,7 +1586,27 @@ def _recipe_from_run_id(run_id: str) -> str:
     return match.group(1) if match else run_id
 
 
-def _study_run_name(result: Mapping[str, Any]) -> str:
+def _resolved_weight_decay(result: Mapping[str, Any]) -> float | None:
+    """Return the resolved base AdamW coefficient when it was recorded."""
+
+    try:
+        value = result["implementation"]["configuration"]["resolved"]["optimizer"]
+        value = value["weight_decay"]
+    except (KeyError, TypeError):
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        return None
+    return float(value)
+
+
+def _study_run_name(
+    result: Mapping[str, Any], *, include_weight_decay: bool = False
+) -> str:
     """Name a run by what varies, so a folder listing reads as a grid.
 
     Falls back to the run id when a field is missing: a directory that cannot
@@ -1616,6 +1636,13 @@ def _study_run_name(result: Mapping[str, Any]) -> str:
         if model.get("parameterization") == "completedp_duration_v1"
         else ""
     )
+    decay = ""
+    if include_weight_decay:
+        weight_decay = _resolved_weight_decay(result)
+        if weight_decay is None:
+            return ""
+        compact_decay = format(weight_decay, ".12g").replace(".", "p")
+        decay = f"-wd{compact_decay}"
     load_scaling = ""
     scaling = (result.get("implementation") or {}).get("expert_load_scaling")
     if scaling is not None:
@@ -1634,7 +1661,7 @@ def _study_run_name(result: Mapping[str, Any]) -> str:
         compact_strength = format(strength, ".12g").replace(".", "p")
         load_scaling = f"-load-{mode}-c{compact_strength}"
     return (
-        f"{tier}{routed}{duration}{load_scaling}-{tpp}tpp-bs{batch}-lr2e{exponent}"
+        f"{tier}{routed}{duration}{load_scaling}{decay}-{tpp}tpp-bs{batch}-lr2e{exponent}"
         f"-s{result.get('seed')}"
     )
 
@@ -1668,8 +1695,7 @@ def export_study(
                 entry = json.loads(line)
                 records[entry.get("run_id")] = entry
 
-    exported = 0
-    exported_names: dict[str, str] = {}
+    candidates: list[tuple[Path, Mapping[str, Any]]] = []
     for run in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
         result_path = run / "result.json"
         if not result_path.is_file():
@@ -1677,9 +1703,22 @@ def export_study(
         if pattern and not pattern.search(run.name):
             continue
         result = json.loads(result_path.read_text(encoding="utf-8"))
-        if result.get("status") != "ok":
-            continue
-        name = _study_run_name(result) or run.name
+        if result.get("status") == "ok":
+            candidates.append((run, result))
+
+    # Archive names describe what varies. Keep the established compact names
+    # for studies with one fixed coefficient, but include weight decay when it
+    # is a scientific axis so otherwise-identical cells cannot collide.
+    include_weight_decay = len(
+        {_resolved_weight_decay(result) for _, result in candidates}
+    ) > 1
+
+    exported = 0
+    exported_names: dict[str, str] = {}
+    for run, result in candidates:
+        name = _study_run_name(
+            result, include_weight_decay=include_weight_decay
+        ) or run.name
         previous = exported_names.get(name)
         if previous is not None:
             raise ReportError(

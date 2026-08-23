@@ -794,6 +794,43 @@ class StudyExportTests(unittest.TestCase):
             ],
         )
 
+    def test_weight_decay_is_named_only_when_it_varies(self) -> None:
+        """A weight-decay grid must not collide, while fixed studies stay terse."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            for run, decay in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                (0.1, 0.3),
+                strict=True,
+            ):
+                payload = json.loads(
+                    (run / "result.json").read_text(encoding="utf-8")
+                )
+                payload["seed"] = 1337
+                payload["metrics"]["experts"] = 8
+                payload["implementation"] = {
+                    "configuration": {
+                        "resolved": {"optimizer": {"weight_decay": decay}}
+                    }
+                }
+                (run / "result.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(summary["runs"], 2)
+        self.assertEqual(
+            folders,
+            [
+                "60m-moe-wd0p1-5tpp-bs1-lr2e-8-s1337",
+                "60m-moe-wd0p3-5tpp-bs1-lr2e-8-s1337",
+            ],
+        )
+
     def test_duplicate_archive_names_fail_instead_of_overwriting(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
