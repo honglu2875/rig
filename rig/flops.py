@@ -207,6 +207,7 @@ _ELEMENTWISE = frozenset(
         "top_k",
         "random_bits",
         "random_seed",
+        "random_split",
         "random_wrap",
         "random_unwrap",
         "random_fold_in",

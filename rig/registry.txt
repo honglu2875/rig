@@ -51,3 +51,7 @@ metric	307	update.p10
 metric	308	update.p50
 metric	309	update.p90
 metric	310	update.p99
+metric	14	moe.local_loss
+metric	15	moe.input_rms
+metric	16	moe.output_rms
+metric	17	moe.output_gradient_rms
