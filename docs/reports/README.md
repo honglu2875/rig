@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 370 runs across fifteen studies, laid out as `<study>/<run-name>/`, at full
+— 406 runs across sixteen studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -50,6 +50,7 @@ by-product:
 | seed-variance | 1,440 | — | 8.4 MB |
 | moe-ablations | 480 bins | — | 0.07 MB |
 | expert-load-scaling | exact endpoints | — | 0.02 MB |
+| moe-weight-decay | exact endpoints | — | 0.04 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -85,6 +86,11 @@ separation. The 72 KiB page uses inline SVG and no runtime JavaScript or fetch.
 validation endpoints and permutation-invariant reductions of the per-expert
 diagnostics. The 19 KiB page uses inline SVG and no runtime JavaScript or fetch;
 the study browser carries the complete trajectories separately.
+
+`moe-weight-decay.html` reports exact validation endpoints for 36 runs, with
+three-seed means, sample-SD whiskers, and same-seed differences. Its 40 KiB
+page is static inline SVG with no runtime JavaScript or fetch; the study
+browser carries the complete trajectories separately.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -147,6 +153,9 @@ uses the same topology and seed.
 The expert-load scaling study is likewise entirely TPU v4 at 4 processes and
 16 chips. Its baseline and four interventions use the same seed and topology.
 
+The MoE weight-decay study is entirely TPU v4 at 4 processes and 16 chips.
+Every decay cell uses seeds 1337–1339 on that same topology.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -163,6 +172,7 @@ The expert-load scaling study is likewise entirely TPU v4 at 4 processes and
 | [duration-ablation](duration-ablation.md) | 42 | 60M/125M | fixed-TPP reference vs cross-horizon duration scaling | [`duration-ablation-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/duration-ablation-60M), [`duration-ablation-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/duration-ablation-125M) |
 | [moe-ablations](moe-ablations.html) | 23 | 60M/125M/250M | learned biases; router auxiliary-loss coefficient | [`moe-no-bias`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-no-bias), [`moe-router-aux-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-router-aux-125M) |
 | [expert-load-scaling](expert-load-scaling.html) | 5 | 125M | per-expert gradient/update scaling by current load | [`moe-expert-load-scaling-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-expert-load-scaling-125M) |
+| [moe-weight-decay](moe-weight-decay.html) | 36 | 60M/125M | base AdamW weight decay × seed | [`moe-weight-decay`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-weight-decay) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -535,6 +545,42 @@ for mode in gradient update; do
       --name "125m-load-${mode}-c${strength}-s1350" -- \
       --expert-load-scaling-mode "$mode" \
       --expert-load-scaling-strength "$strength"
+  done
+done
+```
+
+## moe-weight-decay.html
+
+Thirty-six verified MoE runs sweep the base AdamW weight-decay coefficient at
+60M and 125M, with seeds 1337–1339 at every cell. The 125M bracket extends
+through 0.8 after 0.3 won the initial boundary.
+
+The static [findings report](moe-weight-decay.html) shows exact endpoints,
+three-seed mean ± sample SD, paired differences, and the relevant optimizer
+scaling. At 125M, base decay 0.3 wins all three paired seeds and improves on
+the 0.1 default by 0.015184 nats. The 0.3–0.5 basin is broad; 0.6 turns upward
+and 0.8 returns almost exactly to the no-decay mean.
+
+At 60M, the raw mean favors 0.1, but the 0.3 result is dominated by one run
+with a gradient-norm spike of 20.41 at step 57. The evidence supports 0.3 as a
+125M-specific working choice, not yet as a cross-tier default or as proof of
+non-transfer. More 60M seeds around 0.1–0.3 would settle that distinction.
+
+The complete grid can be reproduced from commit
+`53a15a25f7b20d2701de9730fe17b1a407fdeb16`:
+
+```bash
+for tier in 60m 125m; do
+  decays="0 0.03 0.1 0.3"
+  [ "$tier" = 125m ] && decays="$decays 0.4 0.5 0.6 0.8"
+  for seed in 1337 1338 1339; do
+    for wd in $decays; do
+      rig run weight_decay_moe --context 8k --cluster v4-32 --profile dev \
+        --tier "$tier" --tokens-per-parameter 5 --batch-size 16 \
+        --base-learning-rate 0.00390625 --seed "$seed" \
+        --checkpoint-policy none --name "${tier}-wd${wd}-s${seed}" -- \
+        --weight-decay "$wd"
+    done
   done
 done
 ```

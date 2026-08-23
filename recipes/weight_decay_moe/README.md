@@ -29,6 +29,27 @@ the 125M setup unchanged and evaluates base weight decay `0.4`, `0.5`, `0.6`,
 and `0.8`, again at seeds 1337–1339. These 12 fresh runs reuse the initial
 `0.3` cell as their lower boundary rather than rerunning it.
 
+## Sealed result
+
+The completed study has 36 verified runs. At 125M, base coefficient `0.3`
+wins all three paired seeds and averages **3.567633 ± 0.007781** validation
+loss (mean ± sample SD), improving on the `0.1` default by 0.015184 nats.
+The minimum is broad: `0.4` and `0.5` trail by 0.005930 and 0.004471 nats;
+`0.6` has turned upward and `0.8` is effectively back at no decay.
+
+At 60M, the raw mean chooses `0.1` (3.925148 ± 0.003116), but the apparent
+reversal is dominated by the `0.3`, seed-1338 run, which has a gradient-norm
+spike of 20.41 at step 57 and finishes 0.046494 nats behind its paired `0.1`
+run. The other two paired deltas are -0.013089 and +0.002188. Treat `0.3` as
+the 125M-specific working choice, retain `0.1` as the cross-tier default, and
+resolve the smaller tier with more seeds around `0.1`–`0.3` if needed.
+
+See the static [findings report](../../docs/reports/moe-weight-decay.html) and
+the full-resolution
+[`moe-weight-decay`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-weight-decay)
+archive. The archive card records exact tables, hashes, commands, and the
+project-local CompleteP/Complete(d)P scaling interpretation.
+
 ## Inherited MoE design
 
 A fork of [`reference`](../reference/) that replaces every dense MLP with an
