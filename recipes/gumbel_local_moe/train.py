@@ -1138,7 +1138,6 @@ def resolved_plan_metadata(config: Config) -> dict[str, Any]:
         "expected_tokens": config.final_step * tokens_per_step,
         "validation_predictions": config.validation_predictions,
         "base_learning_rate": config.learning_rate,
-        "local_moe_steps": config.local_moe_steps,
         "batch_ratio": config.batch_multiplier,
         "ladder_data_multiplier": config.data_multiplier,
     }
