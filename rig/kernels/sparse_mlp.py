@@ -28,6 +28,7 @@ SparseMlpCallable = Callable[
     [jax.Array, jax.Array, jax.Array, jax.Array, jax.Array], jax.Array
 ]
 TPU_VECTOR_LANES = 128
+TPU_BF16_SUBLANES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +159,7 @@ def _sparse_decode_kernel(
     down_weight_ref,
     bias_ref,
     output_ref,
-    selected_row_ref,
+    selected_tile_ref,
     accumulator_ref,
 ) -> None:
     """Decode one token block and output tile by DMAing selected rows only."""
@@ -173,14 +174,25 @@ def _sparse_decode_kernel(
         token = assignment // top_k
         slot = assignment % top_k
         feature = indices_ref[token, slot]
-        pltpu.sync_copy(
-            down_weight_ref.at[feature, pl.ds(output_start, output_width)],
-            selected_row_ref,
+        row_in_tile = feature % TPU_BF16_SUBLANES
+        tile_start = pl.multiple_of(
+            feature - row_in_tile,
+            TPU_BF16_SUBLANES,
         )
+        pltpu.sync_copy(
+            down_weight_ref.at[
+                pl.ds(tile_start, TPU_BF16_SUBLANES),
+                pl.ds(output_start, output_width),
+            ],
+            selected_tile_ref,
+        )
+        selected_tile = selected_tile_ref[...].astype(jnp.float32)
+        row_mask = (jnp.arange(TPU_BF16_SUBLANES, dtype=feature.dtype) == row_in_tile)[
+            :, None
+        ]
+        selected_row = jnp.sum(jnp.where(row_mask, selected_tile, 0.0), axis=0)
         value = values_ref[token, slot].astype(jnp.float32)
-        accumulator_ref[token, :] = accumulator_ref[
-            token, :
-        ] + value * selected_row_ref[...].astype(jnp.float32)
+        accumulator_ref[token, :] = accumulator_ref[token, :] + value * selected_row
 
     output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(output_ref.dtype)
 
@@ -223,7 +235,9 @@ def _pallas_sparse_decode_block(
                 ),
                 out_specs=pl.BlockSpec((token_count, output_block), output_index),
                 scratch_shapes=(
-                    pltpu.VMEM((output_block,), down_weight.dtype),
+                    # BF16 HBM rows are physically tiled eight at a time. Load
+                    # one aligned tile, then select the requested row in VMEM.
+                    pltpu.VMEM((TPU_BF16_SUBLANES, output_block), down_weight.dtype),
                     pltpu.VMEM((token_count, output_block), jnp.float32),
                 ),
             ),
