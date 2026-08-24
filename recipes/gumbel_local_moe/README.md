@@ -42,7 +42,7 @@ Training logs add four per-block series when the treatment is enabled:
 `moe.output_gradient_rms`. The recorded local loss is the objective immediately
 before the final local update in that global step.
 
-## First study grid
+## First study grid and result
 
 The first mechanism study is fixed before its full runs. Every arm uses the
 125M tier, 8k context, 5 TPP, global batch 16, base LR `0.00390625`, the
@@ -58,6 +58,21 @@ FineWeb-8B train/validation contract, the v4-32 cluster, and no checkpoint.
 
 All arms run the complete 4,709-step schedule. The grid is not expanded based
 on intermediate losses; further work requires a new declared study.
+
+The grid is complete. Across the three paired K=0/K=2 seeds, final validation
+changes by **+0.000021 nats** while K=2 costs **1.344× traced FLOPs** and
+**1.971× training time**. K=1 and K=4 are also worse than K=0 at their matching
+seed. Clean router entropy falls and logit RMS rises under K=2, while the first
+identical actual-update L2 norm differs from K=0 by only 4.9 parts per million.
+
+The working decision is to preserve this as a negative mechanism result and
+not adopt the treatment. It rejects this normalized objective plus raw-SGD
+realization, not all extra-compute MoE exploration: a follow-up should
+normalize the local delta against the observed outer MoE delta or its predicted
+output displacement. See the prose-led
+[`gumbel-local-moe` report](../../docs/reports/gumbel-local-moe.html) and the
+full-resolution
+[`moe-gumbel-local-125M` archive](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M).
 
 | | `reference` | this fork's MoE baseline |
 |---|---|---|

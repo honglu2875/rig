@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Eight-run mechanism study of Gumbel-routed local optimization inside 125M MoE blocks.">
+<title>Gumbel-local MoE optimization</title>
+<style>
+:root{--paper:#f3f1e9;--surface:#fffdf8;--ink:#172029;--muted:#69727b;--line:#d8dcd7;--teal:#087f78;--navy:#24557a;--coral:#cf5d4b;--gold:#bd7a1b;--lilac:#7563a8;--shadow:0 14px 42px rgba(22,31,35,.07)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:radial-gradient(circle at 91% 1%,rgba(8,127,120,.10),transparent 31rem),radial-gradient(circle at 2% 53%,rgba(207,93,75,.055),transparent 28rem),var(--paper);font:16px/1.72 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}a{color:var(--navy);text-underline-offset:3px}main{max-width:1120px;margin:auto;padding:0 30px 78px}.hero{padding:80px 0 54px;border-bottom:1px solid var(--line)}.eyebrow,.kicker,.figure-label{font-size:11px;line-height:1.35;letter-spacing:.15em;text-transform:uppercase;font-weight:760;color:var(--teal)}h1,h2,h3,p{margin-top:0}h1{max-width:920px;margin:17px 0 24px;font:600 clamp(44px,7.2vw,78px)/.98 ui-serif,Georgia,serif;letter-spacing:-.038em}h1 em{font-weight:400;color:var(--teal)}.deck{max-width:875px;font-size:21px;line-height:1.55;color:#3f4952}.meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:29px}.pill{padding:7px 11px;border:1px solid var(--line);border-radius:999px;background:rgba(255,253,248,.72);font-size:12px;color:#4e5861}.lede{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);gap:56px;padding:56px 0 20px}.lede p:first-child:first-letter{float:left;font:600 64px/.82 ui-serif,Georgia,serif;color:var(--teal);padding:9px 8px 0 0}.answer{align-self:start;background:var(--ink);color:#e8ece9;border-radius:17px;padding:25px 26px;box-shadow:var(--shadow)}.answer small{display:block;color:#93bbb7;text-transform:uppercase;letter-spacing:.11em;font-size:10px;font-weight:750}.answer strong{display:block;margin:9px 0 11px;color:#fff;font:600 28px/1.12 ui-serif,Georgia,serif}.answer p{margin:0;color:#c8cfcc;font-size:13px;line-height:1.6}.essay{max-width:790px;margin:0 auto}.essay section{padding:54px 0 3px}.essay h2{font:600 clamp(29px,4vw,43px)/1.08 ui-serif,Georgia,serif;letter-spacing:-.025em;margin:9px 0 20px}.essay h3{font:650 18px/1.35 ui-serif,Georgia,serif;margin:30px 0 10px}.essay p{margin-bottom:18px}.figure-wide{width:min(1060px,calc(100vw - 34px));margin:32px 50% 26px;transform:translateX(-50%)}.figure-card{background:var(--surface);border:1px solid var(--line);border-radius:17px;padding:23px 23px 17px;box-shadow:var(--shadow)}.figure-card header{display:flex;align-items:baseline;justify-content:space-between;gap:20px;margin-bottom:8px}.figure-card h3{font:600 21px/1.25 ui-serif,Georgia,serif;margin:0}.chart-svg{display:block;width:100%;height:auto;overflow:visible}.grid{stroke:#dfe3df;stroke-width:1}.vgrid{stroke:#dfe3df;stroke-width:1;opacity:.35}.axis{stroke:#707981;stroke-width:1.15}.mean{stroke:var(--ink);stroke-width:2.5}.pair-a{stroke:#087f78}.pair-b{stroke:#cf5d4b}.pair-c{stroke:#7563a8}.pair{fill:none;stroke-width:1.7;opacity:.72}.tick,.axis-label,.note-svg{fill:#69727b;font:11px ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.axis-label{font-size:10px;letter-spacing:.025em}.note-svg{font-size:10px}.figure-note{margin:8px 3px 0;color:var(--muted);font-size:12.5px;line-height:1.55}.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}.table-card{width:min(1060px,calc(100vw - 34px));margin:26px 50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}.table-head{padding:19px 22px 8px}.table-head h3{font:600 20px/1.25 ui-serif,Georgia,serif;margin:0}.table-head p{margin:5px 0;color:var(--muted);font-size:13px}.table-scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:12px 16px;text-align:right;border-top:1px solid #e5e7e3;white-space:nowrap}th{background:#faf9f4;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.075em}th:first-child,td:first-child{text-align:left}.neutral{color:var(--teal);font-weight:750}.worse{color:#a84237;font-weight:750}.aside{margin:27px 0;border-left:3px solid var(--teal);padding:4px 0 4px 21px;font:400 18px/1.62 ui-serif,Georgia,serif}.aside.coral{border-color:var(--coral)}.formula{margin:22px 0;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:rgba(255,253,248,.68);font:15px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;overflow:auto}.small-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:25px 0}.datum{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:17px 18px}.datum small{display:block;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:9px;font-weight:750}.datum strong{display:block;margin:5px 0 3px;font:600 21px/1.2 ui-serif,Georgia,serif}.datum p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}.boundary{margin:31px 0 8px;padding:27px 29px;border:1px solid #cbd5d1;border-radius:16px;background:linear-gradient(135deg,rgba(8,127,120,.07),rgba(255,253,248,.76))}.boundary h3{margin-top:0}.boundary ul{padding-left:20px;margin-bottom:0}.boundary li{margin:8px 0}.decision{width:min(960px,calc(100vw - 34px));margin:63px 50% 0;transform:translateX(-50%);background:var(--ink);color:#f5f4ef;border-radius:19px;padding:34px 37px;display:grid;grid-template-columns:.58fr 1.42fr;gap:38px}.decision h2{margin:0;color:#fff;font:600 33px/1.1 ui-serif,Georgia,serif}.decision p{margin:0;color:#cbd1cf}.decision strong{color:#fff}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:19px}.links a{display:inline-block;padding:9px 13px;border:1px solid #4a555d;border-radius:9px;color:#f2f4f0;text-decoration:none;font-size:12px}.links a:hover{border-color:#91b9b5}.footer{padding-top:50px;color:var(--muted);font-size:12px}@media(max-width:820px){main{padding:0 17px 55px}.hero{padding-top:50px}.lede,.split,.small-grid,.decision{grid-template-columns:1fr}.lede{gap:20px}.decision{gap:18px}.figure-card{padding:17px 10px 13px}.figure-card header{display:block}.figure-card h3{margin-top:5px}.table-card{font-size:13px}th,td{padding:10px 12px}.deck{font-size:18px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}@media print{body{background:#fff}.figure-card,.table-card,.answer{box-shadow:none}main{max-width:none}.figure-wide,.table-card,.decision{width:100%}}
+</style>
+</head>
+<body>
+<main>
+<header class="hero">
+  <div class="eyebrow">MoE mechanism study · 8 complete runs · TPU v4-32</div>
+  <h1>More MoE work.<br><em>Almost no MoE update.</em></h1>
+  <p class="deck">Fresh Gumbel routes and extra block-local optimization consume up to 69% more traced FLOPs. Two local steps nevertheless match the exact baseline to five decimal places in the three-seed mean. The most useful result is not the tie itself, but the traces explaining it: the router hardens while the local parameter move remains microscopic.</p>
+  <div class="meta"><span class="pill">125M active parameters</span><span class="pill">top-2 of 8 experts</span><span class="pill">8k context</span><span class="pill">5 TPP</span><span class="pill">K = 0, 1, 2, 4</span><span class="pill">seeds 1350 / 1369 / 1388</span></div>
+</header>
+
+<div class="lede">
+  <div>
+    <p>The experiment began with a deliberately spare idea. An MoE layer owns much more stored capacity than it activates for any token. If ordinary training only follows the winning route, perhaps a few additional, perturbed routes can explore that capacity without inventing a second optimizer or a collection of routing rules.</p>
+    <p>The implementation does exactly that. The outer pass caches each routed block's input, output, and output gradient. Every local step draws fresh standard Gumbel noise for hard top-2 selection, keeps the clean gate weights on those selected experts, and minimizes one activation-normalized objective with stateless SGD. There is no temperature, trust radius, local LR coefficient, or extra weight decay. <code>K=0</code> is an exact neutral path.</p>
+    <p>That simplicity made the negative result unusually legible. The intervention costs real compute and nudges router statistics, but its parameter-space contribution is so small that the outer AdamW step remains essentially unchanged.</p>
+  </div>
+  <aside class="answer"><small>short answer</small><strong>Do not adopt this realization.</strong><p>K=2 changes mean validation by +0.000021 nats while adding 34.4% FLOPs and nearly doubling wall time. Preserve it as a mechanism result; the broader exploration idea remains open.</p></aside>
+</div>
+
+<article class="essay">
+<section id="endpoint">
+  <span class="kicker">The endpoint</span>
+  <h2>The primary comparison is not merely “not significant”; it has no stable direction.</h2>
+  <p>The main arm is <code>K=2</code> against <code>K=0</code>, paired across three seeds. Seed 1350 improves by 0.00270 nats, seed 1388 improves by 0.00213, and seed 1369 worsens by 0.00489. Those movements cancel to a mean penalty of 0.000021 nats. The single-seed step-count probes are less kind: <code>K=1</code> and <code>K=4</code> both finish worse than the matching seed-1350 baseline.</p>
+  <p>A three-seed null should not be sold as a precise zero. The paired sample SD is 0.00423 and the two-sided 95% Student-t interval is roughly [-0.0105, +0.0105]. But the practical decision does not depend on a tight interval: there is no monotone response to more local steps, no persistent training-curve separation, and a large compute bill attached to the treatment.</p>
+
+  <figure class="figure-wide figure-card">
+    <header><span class="figure-label">paired held-out endpoints</span><h3>Final FineWeb validation loss</h3></header>
+    <svg class="chart-svg" viewBox="0 0 760 350" role="img" aria-label="Validation loss endpoints for local step counts zero, one, two, and four, with paired seed lines between zero and two">
+      <line x1="82" x2="716" y1="60" y2="60" class="grid"/><text x="70" y="64" text-anchor="end" class="tick">3.574</text>
+      <line x1="82" x2="716" y1="108" y2="108" class="grid"/><text x="70" y="112" text-anchor="end" class="tick">3.578</text>
+      <line x1="82" x2="716" y1="156" y2="156" class="grid"/><text x="70" y="160" text-anchor="end" class="tick">3.582</text>
+      <line x1="82" x2="716" y1="204" y2="204" class="grid"/><text x="70" y="208" text-anchor="end" class="tick">3.586</text>
+      <line x1="82" x2="716" y1="252" y2="252" class="grid"/><text x="70" y="256" text-anchor="end" class="tick">3.590</text>
+      <line x1="112" x2="412" y1="140.80" y2="108.36" class="pair pair-a"/>
+      <line x1="112" x2="412" y1="176.19" y2="234.89" class="pair pair-b"/>
+      <line x1="112" x2="412" y1="89.77" y2="64.26" class="pair pair-c"/>
+      <line x1="112" x2="412" y1="135.59" y2="135.84" class="mean"/>
+      <circle cx="112" cy="140.80" r="5" fill="#087f78"><title>seed 1350 · K=0 · 3.580733</title></circle><circle cx="412" cy="108.36" r="5" fill="#087f78"><title>seed 1350 · K=2 · 3.578030</title></circle>
+      <circle cx="112" cy="176.19" r="5" fill="#cf5d4b"><title>seed 1369 · K=0 · 3.583683</title></circle><circle cx="412" cy="234.89" r="5" fill="#cf5d4b"><title>seed 1369 · K=2 · 3.588574</title></circle>
+      <circle cx="112" cy="89.77" r="5" fill="#7563a8"><title>seed 1388 · K=0 · 3.576481</title></circle><circle cx="412" cy="64.26" r="5" fill="#7563a8"><title>seed 1388 · K=2 · 3.574355</title></circle>
+      <rect x="106" y="129.59" width="12" height="12" transform="rotate(45 112 135.59)" fill="#172029" stroke="#fffdf8" stroke-width="2"><title>K=0 mean · 3.580299</title></rect>
+      <rect x="406" y="129.84" width="12" height="12" transform="rotate(45 412 135.84)" fill="#172029" stroke="#fffdf8" stroke-width="2"><title>K=2 mean · 3.580320</title></rect>
+      <circle cx="262" cy="255.64" r="6" fill="#bd7a1b" stroke="#fffdf8" stroke-width="2"><title>seed 1350 · K=1 · 3.590304</title></circle>
+      <circle cx="562" cy="231.82" r="6" fill="#24557a" stroke="#fffdf8" stroke-width="2"><title>seed 1350 · K=4 · 3.588318</title></circle>
+      <line x1="82" x2="716" y1="276" y2="276" class="axis"/>
+      <text x="112" y="300" text-anchor="middle" class="tick">K=0</text><text x="262" y="300" text-anchor="middle" class="tick">K=1</text><text x="412" y="300" text-anchor="middle" class="tick">K=2</text><text x="562" y="300" text-anchor="middle" class="tick">K=4</text>
+      <text x="17" y="158" text-anchor="middle" class="axis-label" transform="rotate(-90 17 158)">validation loss · lower is better</text>
+      <text x="700" y="332" text-anchor="end" class="note-svg">diamonds: three-seed means · circles: individual seeds</text>
+    </svg>
+    <p class="figure-note">Lines pair the same seed from K=0 to K=2. K=1 and K=4 were intentionally run only at seed 1350. Every endpoint scores the same held-out file for 1,048,576 tokens.</p>
+  </figure>
+
+  <div class="table-card"><div class="table-head"><h3>Exact endpoint and cost summary</h3><p>Means and sample SDs exist only for the three-seed arms. Multipliers use the K=0 three-seed mean.</p></div><div class="table-scroll"><table><thead><tr><th>K</th><th>seeds</th><th>validation mean ± SD</th><th>paired Δ vs K=0</th><th>FLOPs ×</th><th>wall ×</th><th>tokens/s</th></tr></thead><tbody><tr><td><strong>0</strong></td><td>3</td><td>3.580299 ± 0.003621</td><td>—</td><td>1.000</td><td>1.000</td><td>394,677</td></tr><tr><td><strong>1</strong></td><td>1</td><td>3.590304</td><td class="worse">+0.009571</td><td>1.172</td><td>1.504</td><td>262,404</td></tr><tr><td><strong>2</strong></td><td>3</td><td>3.580320 ± 0.007381</td><td class="neutral">+0.000021</td><td>1.344</td><td>1.971</td><td>200,251</td></tr><tr><td><strong>4</strong></td><td>1</td><td>3.588318</td><td class="worse">+0.007585</td><td>1.689</td><td>2.978</td><td>132,526</td></tr></tbody></table></div></div>
+</section>
+
+<section id="compute">
+  <span class="kicker">Useful compute</span>
+  <h2>The FLOPs rise gently; the wall clock rises faster; neither buys a better model.</h2>
+  <p>The traced FLOP multiplier is smaller than the local-step count because attention, embeddings, the dense parts of each block, evaluation, and the one outer update are unchanged. Wall time behaves less favorably. The local loop adds separate routed forward/backward work with lower achieved utilization, so <code>K=2</code> is a 1.34× FLOP run but a 1.97× training-time run.</p>
+
+  <figure class="figure-wide figure-card">
+    <header><span class="figure-label">cost relative to exact baseline</span><h3>Traced training FLOPs and observed training time</h3></header>
+    <svg class="chart-svg" viewBox="0 0 760 360" role="img" aria-label="Grouped bars of FLOP and wall-time multipliers for local step counts zero, one, two, and four">
+      <line x1="74" x2="716" y1="286" y2="286" class="axis"/><text x="62" y="290" text-anchor="end" class="tick">0×</text>
+      <line x1="74" x2="716" y1="207.88" y2="207.88" class="grid"/><text x="62" y="212" text-anchor="end" class="tick">1×</text>
+      <line x1="74" x2="716" y1="129.75" y2="129.75" class="grid"/><text x="62" y="134" text-anchor="end" class="tick">2×</text>
+      <line x1="74" x2="716" y1="51.63" y2="51.63" class="grid"/><text x="62" y="56" text-anchor="end" class="tick">3×</text>
+      <rect x="114" y="207.88" width="29" height="78.12" rx="3" fill="#087f78"><title>K=0 FLOPs 1.000x</title></rect><rect x="146" y="207.88" width="29" height="78.12" rx="3" fill="#cf5d4b"><title>K=0 wall 1.000x</title></rect>
+      <rect x="264" y="194.42" width="29" height="91.58" rx="3" fill="#087f78"><title>K=1 FLOPs 1.172x</title></rect><rect x="296" y="168.49" width="29" height="117.51" rx="3" fill="#cf5d4b"><title>K=1 wall 1.504x</title></rect>
+      <rect x="414" y="180.97" width="29" height="105.03" rx="3" fill="#087f78"><title>K=2 FLOPs 1.344x</title></rect><rect x="446" y="132.01" width="29" height="153.99" rx="3" fill="#cf5d4b"><title>K=2 wall 1.971x</title></rect>
+      <rect x="564" y="154.06" width="29" height="131.94" rx="3" fill="#087f78"><title>K=4 FLOPs 1.689x</title></rect><rect x="596" y="53.32" width="29" height="232.68" rx="3" fill="#cf5d4b"><title>K=4 wall 2.978x</title></rect>
+      <text x="145" y="311" text-anchor="middle" class="tick">K=0</text><text x="295" y="311" text-anchor="middle" class="tick">K=1</text><text x="445" y="311" text-anchor="middle" class="tick">K=2</text><text x="595" y="311" text-anchor="middle" class="tick">K=4</text>
+      <rect x="492" y="329" width="12" height="12" rx="2" fill="#087f78"/><text x="510" y="339" class="tick">traced FLOPs</text><rect x="596" y="329" width="12" height="12" rx="2" fill="#cf5d4b"/><text x="614" y="339" class="tick">wall time</text>
+      <text x="18" y="160" text-anchor="middle" class="axis-label" transform="rotate(-90 18 160)">multiplier vs K=0</text>
+    </svg>
+    <p class="figure-note">Training seconds exclude compilation and final evaluation. FLOPs are traced from the compiled JAX program and include the additional routed block work.</p>
+  </figure>
+
+  <p>Looking at a common compute cross-section makes the inefficiency harder to dismiss as an endpoint accident. When seed 1350 reaches the baseline's final cumulative FLOPs, <code>K=0</code> has seen 617M tokens, while K=1/2/4 have seen 527M, 459M, and 365M. Their 100-step-smoothed training losses are 3.5827, 3.6420, 3.6752, and 3.8100. More local work simply displaces useful token updates.</p>
+  <aside class="aside coral">This cross-section is diagnostic, not a formal equi-FLOP sweep. Each arm retains the baseline token-indexed learning-rate schedule; it was not retuned as a function of total FLOPs. The claim is narrower: under the tested training rule, no hidden compute-efficiency benefit is visible.</aside>
+</section>
+
+<section id="router">
+  <span class="kicker">The router response</span>
+  <h2>Gumbel perturbation does not keep the clean router exploratory.</h2>
+  <p>The last 200 steps show a modest improvement in the auxiliary balance statistic: the mean balance loss moves from 1.0451 to 1.0372, and the idlest assignment share rises from 0.0419 to 0.0525. Those numbers might look like the intended exploration if read alone.</p>
+  <p>The confidence statistics point the other way. Clean routing entropy falls by 0.0203 nats in every paired seed, while clean logit RMS rises by 0.0306. The gate's top-1 weight also increases slightly. A coherent explanation is that repeated hard perturbation rewards a router for building larger clean margins that survive the noise. The intervention visits alternative routes, but the learned deterministic router becomes more—not less—decisive.</p>
+
+  <div class="table-card"><div class="table-head"><h3>Permutation-invariant router summaries</h3><p>Last-200-step mean within each run, then mean across the three matched seeds.</p></div><div class="table-scroll"><table><thead><tr><th>statistic</th><th>K=0</th><th>K=2</th><th>K=2 − K=0</th><th>reading</th></tr></thead><tbody><tr><td><strong>balance loss</strong></td><td>1.04506</td><td>1.03724</td><td>-0.00782</td><td>closer to even</td></tr><tr><td><strong>busiest share</strong></td><td>0.27052</td><td>0.28091</td><td>+0.01039</td><td>seed-sensitive</td></tr><tr><td><strong>idlest share</strong></td><td>0.04193</td><td>0.05251</td><td>+0.01058</td><td>less starved</td></tr><tr><td><strong>clean entropy</strong></td><td>1.22945</td><td>1.20911</td><td class="worse">-0.02034</td><td>more decisive</td></tr><tr><td><strong>clean logit RMS</strong></td><td>1.30362</td><td>1.33424</td><td class="worse">+0.03062</td><td>larger margins</td></tr></tbody></table></div></div>
+
+  <p>Hard top-k also limits what the local gradient can express. It can update the experts that happened to be selected and the clean mixture weights attached to them. It cannot differentiate through the identity of the winner, so it cannot directly teach an unselected expert that it should have received the token. Gumbel changes the discrete path; it does not make that path choice differentiable.</p>
+</section>
+
+<section id="magnitude">
+  <span class="kicker">The dominant mechanism</span>
+  <h2>The local objective is mathematically normalized, but its parameter update is numerically negligible.</h2>
+  <p>The local loss combines a normalized output displacement and normalized cached output gradient:</p>
+  <div class="formula">0.5 · mean((Δoutput / activation_RMS + output_gradient / gradient_RMS)²)</div>
+  <p>This is attractive because the cross term supplies a descent direction while the squared displacement acts like an activation-scaled restraint. Yet “dimensionless objective” does not imply “well-scaled parameter update.” The mean is taken over approximately <code>16 × 8192 × 640 ≈ 84 million</code> activation values per block. Its gradient is then fed to raw SGD at a learning rate tuned for AdamW-preconditioned gradients.</p>
+  <p>The diagnostic consequence is stark. On the first outer step—where all arms begin from identical parameters and data—the mean block actual-update L2 norm exceeds K=0 by only a few parts per million.</p>
+
+  <figure class="figure-wide figure-card">
+    <header><span class="figure-label">first identical outer update</span><h3>Excess actual-update L2 norm over K=0</h3></header>
+    <svg class="chart-svg" viewBox="0 0 760 310" role="img" aria-label="Horizontal bars showing 2.7, 4.9, and 9.3 parts per million excess update norm for K one, two, and four">
+      <line x1="190" x2="680" y1="54" y2="54" class="grid"/><line x1="190" x2="680" y1="114" y2="114" class="grid"/><line x1="190" x2="680" y1="174" y2="174" class="grid"/>
+      <text x="170" y="82" text-anchor="end" class="tick">K=1</text><rect x="190" y="61" width="132.3" height="31" rx="4" fill="#bd7a1b"><title>+2.7 ppm</title></rect><text x="332" y="82" class="tick">+2.7 ppm</text>
+      <text x="170" y="142" text-anchor="end" class="tick">K=2</text><rect x="190" y="121" width="240.1" height="31" rx="4" fill="#087f78"><title>+4.9 ppm</title></rect><text x="440" y="142" class="tick">+4.9 ppm</text>
+      <text x="170" y="202" text-anchor="end" class="tick">K=4</text><rect x="190" y="181" width="455.7" height="31" rx="4" fill="#24557a"><title>+9.3 ppm</title></rect><text x="655" y="202" class="tick">+9.3 ppm</text>
+      <line x1="190" x2="680" y1="235" y2="235" class="axis"/>
+      <line x1="190" x2="190" y1="235" y2="241" class="axis"/><text x="190" y="260" text-anchor="middle" class="tick">0</text><line x1="435" x2="435" y1="235" y2="241" class="axis"/><text x="435" y="260" text-anchor="middle" class="tick">5</text><line x1="680" x2="680" y1="235" y2="241" class="axis"/><text x="680" y="260" text-anchor="middle" class="tick">10 ppm</text>
+      <text x="435" y="290" text-anchor="middle" class="axis-label">(treatment update norm / baseline update norm − 1) × 10⁶</text>
+    </svg>
+    <p class="figure-note">Mean across 12 block-scoped <code>update.l2_norm</code> diagnostics at step 1. Step 10 remains effectively 1.000×. Even an orthogonal local vector would be only a few tenths of a percent of the outer update.</p>
+  </figure>
+
+  <div class="small-grid">
+    <div class="datum"><small>K=1 final local state</small><strong>output / input 1.135×</strong><p>objective 0.5166; output-gradient RMS 1.07×10⁻⁷</p></div>
+    <div class="datum"><small>K=2 final local state</small><strong>output / input 1.124×</strong><p>objective 0.5151; output-gradient RMS 0.97×10⁻⁷</p></div>
+    <div class="datum"><small>K=4 final local state</small><strong>output / input 1.128×</strong><p>objective 0.5217; output-gradient RMS 1.01×10⁻⁷</p></div>
+  </div>
+
+  <p>The local loss and activation ratio also show no monotone improvement with more inner steps. That leaves a simple interpretation: these runs spend extra forward/backward compute, but the local vector is too small to compete with the one ordinary AdamW update. The router response is real; the parameter-space exploration is barely there.</p>
+</section>
+
+<section id="next">
+  <span class="kicker">What remains worth testing</span>
+  <h2>Normalize the intervention by what it must compete with.</h2>
+  <p>This study should not motivate a larger reseed of the same code. Its useful follow-up is a change of measurement, not another discretionary coefficient. Cache the ordinary MoE parameter delta—or its predicted output displacement—and scale the local delta to a fixed relationship with that observed quantity. The target can be one outer-update RMS, or one outer-update-induced output RMS. Either choice makes the intervention adaptive to width, depth, layer scale, and training time without introducing a hand-tuned “local LR multiplier.”</p>
+  <p>The next run should log the local and outer update norms separately before they are summed, plus their cosine and predicted output-displacement RMS. That would answer the question this prototype could not: if route-perturbed work is made large enough to matter, does it add a useful direction or merely disturb the outer optimizer?</p>
+
+  <div class="boundary">
+    <h3>Evidence boundary</h3>
+    <ul>
+      <li>The primary comparison has three seeds at one 125M, 8k, 5-TPP setting. K=1 and K=4 are single-seed probes.</li>
+      <li>Every arm uses the same token-indexed LR schedule. The common-FLOP cross-section is diagnostic, not a schedule-retuned equi-FLOP experiment.</li>
+      <li>Per-expert router loads are complete. Parameter/gradient/update diagnostics were requested at block scope only, so expert-specific update attribution is unavailable in this study.</li>
+      <li>The conclusion rejects the tested hard-Gumbel, normalized-objective, raw-SGD realization. It does not reject all extra-compute MoE exploration.</li>
+    </ul>
+  </div>
+</section>
+</article>
+
+<div class="decision">
+  <h2>Working conclusion</h2>
+  <div><p><strong>Keep the result; do not adopt the treatment.</strong> K=2 is endpoint-neutral while costing 1.34× FLOPs and 1.97× training time. Hard Gumbel routing appears to sharpen the clean router, and the actual local parameter move is measured in parts per million of update-norm ratio. A follow-up is justified only after the local step is normalized against the outer step it is meant to supplement.</p><div class="links"><a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M">eight-run archive ↗</a><a href="study-browser.html">interactive full-log browser →</a><a href="../../recipes/gumbel_local_moe/README.md">recipe and exact objective →</a></div></div>
+</div>
+
+<footer class="footer"><p>Prepared 24 August 2026 from full-resolution <code>.riglog</code> artifacts. Exact endpoints and traced FLOP totals are taken from the recorded results; routing summaries use the last 200 optimizer steps; the update-norm comparison uses the first identical step. Static inline SVG, system fonts, no runtime scripts or data fetches. The Hugging Face archive and provenance ledger are authoritative.</p></footer>
+</main>
+</body>
+</html>

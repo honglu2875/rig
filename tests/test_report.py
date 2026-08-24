@@ -31,6 +31,39 @@ from rig.report import (
 
 
 class ReportTests(unittest.TestCase):
+    def test_block_local_moe_metrics_are_charted_as_their_mean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "runs" / "local-moe"
+            run.mkdir(parents=True)
+            columns = (
+                logpack.column("train_loss"),
+                logpack.column("learning_rate"),
+                logpack.column("grad_norm"),
+                logpack.column("moe.local_loss", "block", 0),
+                logpack.column("moe.local_loss", "block", 1),
+            )
+            with logpack.LogWriter(
+                run / TRAINING_LOG_NAME,
+                columns,
+                tokens_per_step=10,
+                flops_per_token=100.0,
+            ) as writer:
+                writer.append(1, (4.5, 1e-4, 0.5, 1.0, 3.0))
+                writer.append(2, (4.0, 9e-5, 0.4, 3.0, 5.0))
+            _write_result(run, validation_artifact=False)
+
+            build_report(root / "runs", root / "report.html")
+            payload = _payload((root / "report.html").read_text(encoding="utf-8"))
+
+        chart = next(
+            item for item in payload["timeCharts"] if item["key"] == "moe.local_loss"
+        )
+        self.assertEqual(
+            chart["series"][0]["points"],
+            [[1.0, 1000.0, 2.0], [2.0, 2000.0, 4.0]],
+        )
+
     def test_nested_expert_diagnostics_do_not_double_count_parent_blocks(self) -> None:
         columns = (
             logpack.column("grad.l2_norm", "overall", element_count=8),
@@ -791,6 +824,41 @@ class StudyExportTests(unittest.TestCase):
             [
                 "60m-moe-load-gradient-c0p5-5tpp-bs1-lr2e-8-s1350",
                 "60m-moe-load-update-c1-5tpp-bs1-lr2e-8-s1350",
+            ],
+        )
+
+    def test_local_moe_step_count_is_an_archive_coordinate(self) -> None:
+        """Matched local-step arms must remain distinct after export."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            for run, local_steps in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                (0, 2),
+                strict=True,
+            ):
+                payload = json.loads(
+                    (run / "result.json").read_text(encoding="utf-8")
+                )
+                payload["seed"] = 1350
+                payload["metrics"]["experts"] = 8
+                payload["implementation"] = {
+                    "local_moe_optimization": {"steps": local_steps}
+                }
+                (run / "result.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(summary["runs"], 2)
+        self.assertEqual(
+            folders,
+            [
+                "60m-moe-local-k0-5tpp-bs1-lr2e-8-s1350",
+                "60m-moe-local-k2-5tpp-bs1-lr2e-8-s1350",
             ],
         )
 
