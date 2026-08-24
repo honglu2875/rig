@@ -369,11 +369,19 @@ class TierDefinition:
     def tpp_parameters_for_mlp_mult(self, mlp_mult: int) -> int:
         """Stored parameter count for one explicit dictionary expansion."""
 
+        return self.stored_parameters(
+            layers=self.model.layers,
+            mlp_mult=mlp_mult,
+        )
+
+    def stored_parameters(self, *, layers: int, mlp_mult: int) -> int:
+        """Stored parameters for one explicit depth/dictionary treatment."""
+
         model = self.model
         width = model.d_model
         return (
             2 * model.vocab_size * width
-            + model.layers
+            + layers
             * ((4 + 2 * mlp_mult) * width * width + (mlp_mult + 7) * width)
             + width
         )
@@ -694,6 +702,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sparse = parser.add_argument_group("sparse MLP")
     sparse.add_argument(
+        "--sparse-layers",
+        type=positive_int,
+        default=None,
+        help="research override for transformer depth",
+    )
+    sparse.add_argument(
         "--sparse-mlp-mult",
         type=positive_int,
         default=None,
@@ -717,6 +731,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="implementation-only Pallas decoder output tile override",
     )
+    sparse.add_argument(
+        "--sparse-training-steps",
+        type=positive_int,
+        default=None,
+        help=(
+            "explicit full cosine-schedule horizon for equi-FLOP research; "
+            "mutually exclusive with --tokens-per-parameter"
+        ),
+    )
     add_standard_reporting_arguments(optim)
     return parser
 
@@ -738,6 +761,13 @@ def validate_args(
         not math.isfinite(args.base_learning_rate) or args.base_learning_rate <= 0.0
     ):
         raise ValueError("--base-learning-rate must be finite and positive")
+    if (
+        args.sparse_training_steps is not None
+        and args.tokens_per_parameter is not None
+    ):
+        raise ValueError(
+            "--sparse-training-steps and --tokens-per-parameter are mutually exclusive"
+        )
     validate_standard_data_arguments(args)
     validate_standard_reporting_arguments(args)
     validate_standard_xprof_arguments(
@@ -775,6 +805,7 @@ def resolve_config(
     definition = experiment_config.run
     tier = family.tiers[selected_tier_name]
     model = tier.model
+    layers = args.sparse_layers or model.layers
     mlp_mult = args.sparse_mlp_mult or model.mlp_mult
     mlp_top_k = args.sparse_top_k or model.mlp_top_k
     hidden_width = mlp_mult * model.d_model
@@ -786,7 +817,9 @@ def resolve_config(
     base_tpp_parameters = family.base_tpp_parameters_for_mlp_mult(mlp_mult)
     duration = definition.training.duration
     tpp_parameters = (
-        tier.tpp_parameters_for_mlp_mult(mlp_mult) if duration.is_fixed_tpp else None
+        tier.stored_parameters(layers=layers, mlp_mult=mlp_mult)
+        if duration.is_fixed_tpp
+        else None
     )
     kernels = definition.kernels
     optimizer = definition.optimizer
@@ -816,7 +849,17 @@ def resolve_config(
     batch_size = args.batch_size or batch_anchor
     tokens_per_step = batch_size * seq_len
     early_stop = getattr(args, "stop_after_step", None)
-    if not duration.is_fixed_tpp:
+    explicit_steps = args.sparse_training_steps
+    if explicit_steps is not None:
+        if not duration.is_fixed_tpp:
+            raise ValueError(
+                "--sparse-training-steps requires a fixed-TPP dev or official profile"
+            )
+        if tpp_parameters is None:
+            raise AssertionError("explicit step horizon has no parameter denominator")
+        steps = explicit_steps
+        requested_tpp = steps * tokens_per_step / float(tpp_parameters)
+    elif not duration.is_fixed_tpp:
         if args.tokens_per_parameter is not None:
             raise ValueError(
                 "--tokens-per-parameter cannot override a fixed-step configuration"
@@ -903,10 +946,17 @@ def resolve_config(
     # This project reanchors every TPP ladder. The multiplier captures only the
     # model-size-induced data growth within one fixed-TPP ladder; it deliberately
     # omits any cross-horizon TPP / TPP_0 factor.
+    # An explicit step horizon defines a new equi-FLOP comparison anchor. Do
+    # not reinterpret its intentionally different token count as fixed-TPP
+    # model-ladder scaling in the optimizer.
     data_multiplier = (
-        tpp_parameters / float(base_tpp_parameters)
-        if tpp_parameters is not None
-        else 1.0
+        1.0
+        if explicit_steps is not None
+        else (
+            tpp_parameters / float(base_tpp_parameters)
+            if tpp_parameters is not None
+            else 1.0
+        )
     )
     base_learning_rate = (
         args.base_learning_rate
@@ -926,7 +976,7 @@ def resolve_config(
         batch_size=batch_size,
         seq_len=seq_len,
         sampling=training.sampling,
-        layers=model.layers,
+        layers=layers,
         heads=model.heads,
         d_model=model.d_model,
         mlp_mult=mlp_mult,
@@ -1756,7 +1806,9 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
     def loss(trainable: Mapping[str, Any]) -> jax.Array:
         return cross_entropy(trainable, tokens, targets, config)
 
-    rules = default_rules().with_scope("sparse_topk_mlp", sparse_topk_mlp_flop_rule)
+    rules = default_rules().with_scope(
+        "_selected_sparse_topk_mlp", sparse_topk_mlp_flop_rule
+    )
     return count_training_flops(loss, params, rules=rules)
 
 

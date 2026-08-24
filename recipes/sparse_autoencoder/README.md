@@ -80,17 +80,21 @@ dense parameter count:
 | 1B | 21 | 1,792 | 28 | 2,608,872,448 |
 
 Fixed-TPP duration uses this stored parameter count because every encoder
-column is scored. A dictionary-width override therefore changes the token
-horizon; a TopK override does not. CompleteP width/depth scaling remains
-anchored to the source tier geometry and is intentionally not retuned in this
-mechanism study.
+column is scored. A dictionary-width override therefore changes the default
+token horizon; a TopK override does not. `--sparse-training-steps` replaces
+that default with an explicit full cosine-schedule horizon for equi-FLOP
+research. Explicit-step runs reanchor the duration scalars (`m_D=1`) instead
+of pretending their deliberately adjusted token counts form a fixed-TPP model
+ladder. CompleteP width/depth scaling still follows the resolved width and
+depth.
 
-The two recipe-local research overrides belong after the harness boundary:
+Recipe-local research overrides belong after the harness boundary:
 
 ```bash
 uv run --frozen --no-sync rig run sparse_autoencoder \
   --profile dev --tier 60m --context 8k -- \
-  --sparse-mlp-mult 16 --sparse-top-k 128
+  --sparse-layers 13 --sparse-mlp-mult 8 --sparse-top-k 384 \
+  --sparse-training-steps 2267
 ```
 
 `--sparse-mlp-backend pallas` and `--sparse-mlp-output-block` are
@@ -98,23 +102,43 @@ implementation-only comparison knobs. The former selects the slower custom
 decoder; the latter changes only its physical output tile. They are intended
 for timing gates, not as study coordinates.
 
-## First mechanism grid
+## 60M-equivalent compute ladder
 
-The initial screen holds the 60M geometry, 16× dictionary, 8k context, 5 TPP,
-global batch 16, base LR `0.00390625`, seed 1350, FineWeb-8B train/validation
-contract, and no checkpoint fixed. Only `k` varies:
+The comparison anchor is a fresh dense 60M reference run at 8k context, 5 TPP,
+global batch 16, base LR `0.00390625`, and seed 1350. It executes 2,286 steps,
+299,630,592 tokens, 737,673,984 traced training FLOPs/token, and therefore
+221,029,692,528,918,528 total FLOPs.
 
-| `k` | role |
-|---:|---|
-| 32 | very sparse decoder |
-| 64 | lower-active probe |
-| 128 | primary default |
-| 256 | higher-active probe |
+For every sparse coordinate, `H/D` is stored dictionary width and `K/D` is the
+maximum retained width. Full-model FLOPs are exactly affine in depth. We trace
+one and two layers, solve for the real-valued depth matching the dense
+FLOPs/token, choose the nearest integer depth, and finally adjust whole steps
+to match the dense *total* FLOP budget. The largest remaining mismatch is less
+than 0.02%. Cells below are `layers / schedule steps`:
 
-The ten-step trajectory-preserving gate passed finite-loss checks for both
-implementations and selected gathered JAX on measured throughput. The sweep
-retains exact unit-level TopK semantics; it does not silently substitute block
-sparsity to make Pallas faster.
+| `H/D` | `K=4D` | `K=2D` | `K=D` | `K=D/2` | `K=D/4` |
+|---:|---:|---:|---:|---:|---:|
+| 4 | 12 / 2286 | 13 / 2255 | 13 / 2315 | 13 / 2346 | 14 / 2228 |
+| 8 | 12 / 2243 | 12 / 2354 | 13 / 2267 | 13 / 2297 | 13 / 2312 |
+| 16 | 11 / 2316 | 12 / 2264 | 12 / 2319 | 12 / 2348 | 13 / 2218 |
+
+`H=4D, K=4D, L=12` is a ReLU activation control: TopK retains the complete
+intermediate, and its algorithmic matrix FLOPs equal the dense 4× GELU block.
+That endpoint takes an exact dense-ReLU fast path, avoiding a meaningless full
+sort and gather; a fuzzy test pins its output and every gradient to the literal
+TopK definition. Partially selected treatments still use the selected-row
+decoder and sparse custom VJP.
+The `K=4D` column holds nominal active width fixed while adding dictionary
+capacity. Lower-`K` columns spend the saved decoder/backward FLOPs on depth.
+Because exact TopK must score all `H` features, increasing `H` still consumes
+compute even when `K` is small.
+
+This is a candidate lattice, not a promise to spend blindly. A short hardware
+gate measures the high-`K` cases first; the one-seed queue is reduced if an
+exact coordinate is impractical on v4. Any retained run uses the same
+FineWeb-8B training/validation contract, batch, LR, seed, and final canonical
+validation. Comparison uses validation loss at the common 221.03-PFLOP
+endpoint and training trajectories against cumulative traced FLOPs.
 
 Use the harness rather than invoking `train.py` directly:
 
@@ -122,9 +146,10 @@ Use the harness rather than invoking `train.py` directly:
 uv run --frozen --no-sync rig run sparse_autoencoder --profile smoke
 uv run --frozen --no-sync rig run sparse_autoencoder \
   --cluster v4-32 --profile dev --tier 60m --context 8k \
-  --tokens-per-parameter 5 --batch-size 16 --seed 1350 \
-  --checkpoint-policy none --name 60m-16x-k128-s1350 -- \
-  --sparse-mlp-mult 16 --sparse-top-k 128
+  --batch-size 16 --seed 1350 --checkpoint-policy none \
+  --name 60m-eqflop-h8d-kd-l13-s1350 -- \
+  --sparse-layers 13 --sparse-mlp-mult 8 --sparse-top-k 384 \
+  --sparse-training-steps 2267
 ```
 
 All ordinary run artifacts and validation-contamination safeguards are
