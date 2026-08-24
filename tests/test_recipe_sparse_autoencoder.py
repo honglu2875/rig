@@ -45,7 +45,7 @@ class SparseAutoencoderRecipeTests(unittest.TestCase):
         self.assertEqual(config.mlp_mult, 16)
         self.assertEqual(config.mlp_top_k, 128)
         self.assertEqual(config.sparse_mlp_backend, "pallas")
-        self.assertEqual(config.sparse_mlp_token_block, 256)
+        self.assertEqual(config.sparse_mlp_token_block, 8)
         self.assertEqual(config.declared_parameters, 102_440_832)
         self.assertEqual(config.steps, 3_908)
         validate_recipe_plan(trainer.resolved_plan_metadata(config))

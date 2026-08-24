@@ -99,8 +99,8 @@ run:
   kernels:
     attention_backend: tpu_flash
     sparse_mlp_backend: pallas
-    # Long assignment grids amortize the data-dependent gather pipeline setup.
-    sparse_mlp_token_block: 256
+    # Bounds the fused selected-row scratch below one MiB at 60M/k=128.
+    sparse_mlp_token_block: 8
     sparse_mlp_output_block: 128
     loss_backend: tiled
     vocab_tile_size: 2048
