@@ -28,7 +28,6 @@ SparseMlpCallable = Callable[
     [jax.Array, jax.Array, jax.Array, jax.Array, jax.Array], jax.Array
 ]
 TPU_VECTOR_LANES = 128
-TPU_BF16_SUBLANES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,42 +155,31 @@ def naive_dense_topk_mlp(
 def _sparse_decode_kernel(
     indices_ref,
     values_ref,
-    down_tile_ref,
+    down_weight_ref,
     bias_ref,
     output_ref,
-    accumulator_ref,
+    selected_rows_ref,
 ) -> None:
-    """Accumulate one selected row in an automatically pipelined grid."""
+    """Gather, weight, and reduce one bounded block of selected rows."""
 
-    token_count, top_k = values_ref.shape
-    assignment = pl.program_id(1)
-
-    @pl.when(assignment == 0)
-    def initialize_accumulator() -> None:
-        accumulator_ref[...] = jnp.zeros(accumulator_ref.shape, jnp.float32)
-
-    token = assignment // top_k
-    slot = assignment % top_k
-    feature = indices_ref[token, slot]
-    row_in_tile = feature % TPU_BF16_SUBLANES
-    selected_tile = down_tile_ref[...].astype(jnp.float32)
-    row_ids = lax.broadcasted_iota(
-        feature.dtype,
-        selected_tile.shape,
-        dimension=0,
+    output_width = output_ref.shape[-1]
+    output_start = pl.program_id(0) * output_width
+    pltpu.sync_copy(
+        down_weight_ref.at[
+            indices_ref[...],
+            pl.ds(output_start, output_width),
+        ],
+        selected_rows_ref,
     )
-    selected_row = jnp.sum(
-        jnp.where(row_ids == row_in_tile, selected_tile, 0.0),
-        axis=0,
+    selected_rows = selected_rows_ref[...].astype(jnp.float32)
+    values = lax.broadcast_in_dim(
+        values_ref[...].astype(jnp.float32),
+        selected_rows.shape,
+        broadcast_dimensions=(0, 1),
     )
-    value = values_ref[token, slot].astype(jnp.float32)
-    accumulator_ref[token, :] = accumulator_ref[token, :] + value * selected_row
-
-    @pl.when(assignment == pl.num_programs(1) - 1)
-    def store_output() -> None:
-        output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(
-            output_ref.dtype
-        )
+    output_ref[...] = (jnp.sum(values * selected_rows, axis=1) + bias_ref[0, :]).astype(
+        output_ref.dtype
+    )
 
 
 def _pallas_sparse_decode_block(
@@ -204,54 +192,49 @@ def _pallas_sparse_decode_block(
     interpret: bool,
     debug: bool,
 ) -> jax.Array:
-    """Decode a fixed token block with a pipelined sparse gather grid."""
+    """Decode a fixed token block with one bounded batched gather per tile."""
 
     token_count, top_k = values.shape
     _, output_width = down_weight.shape
-    assignments = token_count * top_k
-    grid = (output_width // output_block, assignments)
+    grid = (output_width // output_block,)
 
-    def weight_index(output_index, assignment, indices_ref, _values_ref):
-        token = assignment // top_k
-        slot = assignment % top_k
-        feature_tile = indices_ref[token, slot] // TPU_BF16_SUBLANES
-        return feature_tile, output_index
+    def values_index(_output_index, _indices_ref):
+        return 0, 0
 
-    def bias_index(output_index, _assignment, _indices_ref, _values_ref):
+    def bias_index(output_index, _indices_ref):
         return 0, output_index
 
-    def output_index(output_index, _assignment, _indices_ref, _values_ref):
+    def output_index(output_index, _indices_ref):
         return 0, output_index
 
     with jax.named_scope("sparse_topk_decoder"):
         return pl.pallas_call(
             _sparse_decode_kernel,
             grid_spec=pltpu.PrefetchScalarGridSpec(
-                # Both arrays are deliberately bounded by token_block.  SMEM
-                # gives the irregular inner loop cheap scalar addressing.
-                num_scalar_prefetch=2,
+                # Indices are bounded by token_block and prefetched into SMEM;
+                # values arrive in VMEM so their weighted reduction is vectorized.
+                num_scalar_prefetch=1,
                 grid=grid,
                 in_specs=(
-                    # Exact unit-level sparsity maps each selected feature to
-                    # its physical eight-row BF16 HBM tile. Assignments are the
-                    # inner grid axis so Pallas overlaps dynamic transfers and
-                    # keeps the output accumulator resident in VMEM.
-                    pl.BlockSpec((TPU_BF16_SUBLANES, output_block), weight_index),
+                    pl.BlockSpec((token_count, top_k), values_index),
+                    # Retain the complete matrix in HBM; the kernel requests
+                    # only the selected rows for this bounded token block.
+                    pl.BlockSpec(memory_space=pltpu.HBM),
                     pl.BlockSpec((1, output_block), bias_index),
                 ),
                 out_specs=pl.BlockSpec((token_count, output_block), output_index),
-                scratch_shapes=(pltpu.VMEM((token_count, output_block), jnp.float32),),
+                scratch_shapes=(
+                    pltpu.VMEM((token_count, top_k, output_block), down_weight.dtype),
+                ),
             ),
             out_shape=jax.ShapeDtypeStruct((token_count, output_width), values.dtype),
             interpret=interpret,
             debug=debug,
-            compiler_params=pltpu.CompilerParams(
-                dimension_semantics=("parallel", "arbitrary")
-            ),
+            compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",)),
             name="sparse_topk_decode",
         )(
             indices.astype(jnp.int32),
-            values.astype(jnp.float32),
+            values,
             down_weight,
             down_bias[None, :],
         )
@@ -270,11 +253,10 @@ def pallas_sparse_decode(
 ) -> jax.Array:
     """Chunked exact sparse decode without materializing ``[..., k, d]``.
 
-    ``indices`` and ``values`` for one token block are scalar-prefetched into
-    TPU SMEM. The assignment grid pipelines the aligned eight-row BF16 tile
-    containing each selected decoder row, selects that row in VMEM, and retains
-    the FP32 output accumulator across all assignments. Chunking bounds both
-    SMEM and VMEM use independently of sequence length.
+    ``indices`` for one token block are prefetched into TPU SMEM, while values
+    arrive in VMEM. One bounded gather fetches the selected decoder rows into
+    VMEM, where weighting and reduction are fused before the result returns to
+    HBM. Chunking prevents a full-sequence ``[tokens, k, d]`` temporary.
     """
 
     prefix = values.shape[:-1]
