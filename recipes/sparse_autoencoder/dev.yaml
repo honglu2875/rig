@@ -93,8 +93,8 @@ run:
     dtype: bfloat16
   kernels:
     attention_backend: tpu_flash
-    sparse_mlp_backend: pallas
-    # Bounds the fused selected-row scratch below one MiB at 60M/k=128.
+    sparse_mlp_backend: reference
+    # Bounds the Pallas prototype's SMEM-prefetched assignment metadata.
     sparse_mlp_token_block: 8
     sparse_mlp_output_block: 128
     loss_backend: tiled

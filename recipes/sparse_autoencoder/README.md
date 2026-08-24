@@ -24,21 +24,32 @@ Exact TopK cannot avoid scoring the complete dictionary: without a separate
 router, every `x · W_up[:, h]` is needed to know whether feature `h` belongs to
 the top k. The implementation does not hide that cost.
 
-After selection, the TPU decoder in
-[`rig/kernels/sparse_mlp.py`](../../rig/kernels/sparse_mlp.py) never constructs
-a dense hidden vector full of zeros. It batches tokens into bounded chunks,
-prefetches their selected values and indices into SMEM, and uses a Pallas
-kernel to DMA only the selected rows of `W_down` for each 128-wide output tile.
-Token chunks are vmapped into a parallel kernel-grid dimension. A custom VJP
-loops over one selected slot at a time, so dX, dW_up, and dW_down also avoid a
+After selection, neither decoder constructs a dense hidden vector full of
+zeros. The default gathered-JAX path indexes only the selected rows of
+`W_down` and contracts those with the retained values. The Pallas prototype in
+[`rig/kernels/sparse_mlp.py`](../../rig/kernels/sparse_mlp.py) instead batches
+tokens into bounded chunks, prefetches values and indices into SMEM, pipelines
+the physical eight-row BF16 tiles containing the selected rows, and keeps an
+FP32 output accumulator in VMEM. A custom VJP shared by both paths loops over
+one selected slot at a time, so dX, dW_up, and dW_down avoid both a
 `[tokens, hidden]` cotangent and a `[tokens, k, d_model]` temporary. AdamW still
 owns dense parameter and moment arrays; sparsity does not remove that storage.
 
-The small pure-JAX path is the CPU fallback and correctness oracle. Tests
-compare Pallas interpreter output and every gradient against the literal
-`dense -> TopK-ReLU -> dense` definition. A real-TPU compile and timing gate is
-still required because an exact unstructured gather can be bandwidth-bound
-even when it performs fewer arithmetic operations.
+Tests compare Pallas interpreter output and every gradient against the literal
+`dense -> TopK-ReLU -> dense` definition. The real-v4 gate found that the
+compiler's gathered-JAX path is substantially faster than this TensorCore
+Pallas implementation:
+
+| exact decoder | 60M/16x/k128 throughput |
+|---|---:|
+| gathered JAX | 134.91K tokens/s |
+| Pallas, 128-wide tiles | 18.82K tokens/s |
+| Pallas, full 384-wide tile | 35.93K tokens/s |
+
+The Pallas runtime on this v4 exposes no SparseCore gather backend, and a
+bounded indirect TensorCore DMA is not supported. Official and dev therefore
+use gathered JAX. The slower Pallas path remains as a tested prototype and
+implementation comparison; it is not used for the mechanism sweep.
 
 The algorithmic MLP training cost per token and layer is
 
@@ -56,9 +67,9 @@ The traced FLOP report applies this contract at the named sparse-MLP boundary.
 ## Configuration and parameter counts
 
 `config.yaml`, `dev.yaml`, and `smoke.yaml` are complete standalone documents.
-Official and dev select the Pallas sparse decoder; smoke selects the exact
-reference backend. The non-smoke tier names preserve the source transformer's
-depth/width geometry, not its old dense parameter count:
+Official, dev, and smoke select the exact gathered-JAX decoder. The non-smoke
+tier names preserve the source transformer's depth/width geometry, not its old
+dense parameter count:
 
 | tier geometry | layers | width | heads | stored parameters at 16× |
 |---|---:|---:|---:|---:|
@@ -82,11 +93,10 @@ uv run --frozen --no-sync rig run sparse_autoencoder \
   --sparse-mlp-mult 16 --sparse-top-k 128
 ```
 
-`--sparse-mlp-backend reference` and `--sparse-mlp-output-block` are
-implementation-only comparison knobs. The former preserves the exact math
-while replacing the Pallas decoder with JAX gather/einsum; the latter changes
-only the physical decoder output tile. They are intended for timing gates, not
-as study coordinates.
+`--sparse-mlp-backend pallas` and `--sparse-mlp-output-block` are
+implementation-only comparison knobs. The former selects the slower custom
+decoder; the latter changes only its physical output tile. They are intended
+for timing gates, not as study coordinates.
 
 ## First mechanism grid
 
@@ -101,11 +111,10 @@ contract, and no checkpoint fixed. Only `k` varies:
 | 128 | primary default |
 | 256 | higher-active probe |
 
-Before this queue, a ten-step trajectory-preserving run must pass real-TPU
-compilation, finite-loss checks, and a kernel timing comparison. The full grid
-is not launched if the Pallas path is slower than the exact gathered JAX
-reference or exhibits a compile/runtime failure; that outcome is a kernel
-result, not permission to silently substitute block sparsity.
+The ten-step trajectory-preserving gate passed finite-loss checks for both
+implementations and selected gathered JAX on measured throughput. The sweep
+retains exact unit-level TopK semantics; it does not silently substitute block
+sparsity to make Pallas faster.
 
 Use the harness rather than invoking `train.py` directly:
 
