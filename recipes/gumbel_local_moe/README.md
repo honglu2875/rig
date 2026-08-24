@@ -66,10 +66,13 @@ seed. Clean router entropy falls and logit RMS rises under K=2, while the first
 identical actual-update L2 norm differs from K=0 by only 4.9 parts per million.
 
 The working decision is to preserve this as a negative mechanism result and
-not adopt the treatment. It rejects this normalized objective plus raw-SGD
-realization, not all extra-compute MoE exploration: a follow-up should
-normalize the local delta against the observed outer MoE delta or its predicted
-output displacement. See the prose-led
+not carry the current raw-SGD update forward unchanged. It rejects this
+normalization, not extra-compute MoE exploration: a follow-up should normalize
+the local delta against the observed outer MoE delta or its predicted output
+displacement, then test appropriately resized models at matched total FLOPs.
+The present wall multiplier is an implementation measurement at 125M, not the
+algorithmic criterion; larger expert matmuls should make the local work more
+compute-bound. See the prose-led
 [`gumbel-local-moe` report](../../docs/reports/gumbel-local-moe.html) and the
 full-resolution
 [`moe-gumbel-local-125M` archive](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M).

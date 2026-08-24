@@ -51,7 +51,7 @@ by-product:
 | moe-ablations | 480 bins | — | 0.07 MB |
 | expert-load-scaling | exact endpoints | — | 0.02 MB |
 | moe-weight-decay | exact endpoints | — | 0.04 MB |
-| gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.03 MB |
+| gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.04 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -96,7 +96,7 @@ browser carries the complete trajectories separately.
 `gumbel-local-moe.html` is a prose-led mechanism report over eight runs. Its
 three figures use exact validation endpoints, recorded cost multipliers,
 last-200-step permutation-invariant router summaries, and the first identical
-update diagnostic. The 27 KiB page is static inline SVG with no runtime
+update diagnostic. The 38 KiB page is static inline SVG with no runtime
 JavaScript or fetch. The study browser adds mean-across-block timelines for the
 four local-objective metrics; raw logs preserve every block separately.
 
@@ -616,10 +616,14 @@ changes by only 4.9 parts per million for K=2: the raw-SGD local vector is tiny
 beside the AdamW update it is meant to supplement.
 
 This rejects the exact normalization/SGD realization, not all extra-compute
-MoE exploration. A useful follow-up should normalize the local delta against
-the observed outer MoE delta or its output displacement, then record the two
-contributions separately. Parameter/gradient/update diagnostics in this study
-are block-scoped only; per-expert router loads remain complete.
+MoE exploration. The cost multipliers describe this 125M implementation; they
+are not a substitute for an algorithmically equi-FLOP comparison. A useful
+follow-up should normalize the local delta against the observed outer MoE delta
+or its output displacement, record the two contributions separately, and then
+compare appropriately sized larger models at matched total FLOPs. Larger
+expert matmuls should also move the local path toward compute-bound execution.
+Parameter/gradient/update diagnostics in this study are block-scoped only;
+per-expert router loads remain complete.
 
 The full grid is clean at commit
 `28df45b92ad4f56b0519ea01b4c3f3e95d3b73fa`:
