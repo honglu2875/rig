@@ -711,6 +711,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="implementation override for exact TPU kernel comparisons",
     )
+    sparse.add_argument(
+        "--sparse-mlp-output-block",
+        type=positive_int,
+        default=None,
+        help="implementation-only Pallas decoder output tile override",
+    )
     add_standard_reporting_arguments(optim)
     return parser
 
@@ -858,6 +864,9 @@ def resolve_config(
     compute_dtype = jnp.bfloat16 if dtype_name == "bfloat16" else jnp.float32
     attention_backend = kernels.attention_backend
     sparse_mlp_backend = args.sparse_mlp_backend or kernels.sparse_mlp_backend
+    sparse_mlp_output_block = (
+        args.sparse_mlp_output_block or kernels.sparse_mlp_output_block
+    )
     if attention_backend != "dense" and platform != "tpu":
         raise ValueError(
             f"{config_filename} attention_backend {attention_backend} requires a TPU runtime"
@@ -871,13 +880,15 @@ def resolve_config(
         raise ValueError(
             f"{config_filename} sparse_mlp_backend pallas requires a TPU runtime"
         )
-    if (
-        sparse_mlp_backend == "pallas"
-        and model.d_model % kernels.sparse_mlp_output_block
-    ):
+    if sparse_mlp_backend == "pallas" and sparse_mlp_output_block % 128:
+        raise ValueError(
+            f"sparse_mlp_output_block {sparse_mlp_output_block} must be a "
+            "multiple of 128 for Pallas"
+        )
+    if sparse_mlp_backend == "pallas" and model.d_model % sparse_mlp_output_block:
         raise ValueError(
             f"{config_filename} sparse_mlp_output_block "
-            f"{kernels.sparse_mlp_output_block} must divide d_model {model.d_model}"
+            f"{sparse_mlp_output_block} must divide d_model {model.d_model}"
         )
     if (
         sparse_mlp_backend == "pallas"
@@ -953,7 +964,7 @@ def resolve_config(
         attention_backend=attention_backend,
         sparse_mlp_backend=sparse_mlp_backend,
         sparse_mlp_token_block=kernels.sparse_mlp_token_block,
-        sparse_mlp_output_block=kernels.sparse_mlp_output_block,
+        sparse_mlp_output_block=sparse_mlp_output_block,
         loss_backend=kernels.loss_backend,
         vocab_tile_size=kernels.vocab_tile_size,
         dtype_name=dtype_name,

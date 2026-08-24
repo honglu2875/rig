@@ -82,9 +82,11 @@ uv run --frozen --no-sync rig run sparse_autoencoder \
   --sparse-mlp-mult 16 --sparse-top-k 128
 ```
 
-`--sparse-mlp-backend reference` is an implementation-only comparison knob;
-it preserves the exact math while replacing the Pallas decoder with JAX
-gather/einsum. It is intended for the timing gate, not as a study coordinate.
+`--sparse-mlp-backend reference` and `--sparse-mlp-output-block` are
+implementation-only comparison knobs. The former preserves the exact math
+while replacing the Pallas decoder with JAX gather/einsum; the latter changes
+only the physical decoder output tile. They are intended for timing gates, not
+as study coordinates.
 
 ## First mechanism grid
 
