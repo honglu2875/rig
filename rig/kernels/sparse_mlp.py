@@ -13,16 +13,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 import functools
 import math
-from typing import Literal
+from typing import Callable, Literal
 
 import jax
 from jax import lax
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 import jax.numpy as jnp
+from jax.sharding import Mesh, PartitionSpec as P
 
 
 Backend = Literal["auto", "pallas", "reference"]
+SparseMlpCallable = Callable[
+    [jax.Array, jax.Array, jax.Array, jax.Array, jax.Array], jax.Array
+]
 TPU_VECTOR_LANES = 128
 
 
@@ -82,9 +86,7 @@ def _validate_inputs(
             f"down_bias must have shape {(model_width,)}, got {down_bias.shape}"
         )
     if config.top_k > hidden_width:
-        raise ValueError(
-            f"top_k {config.top_k} exceeds hidden width {hidden_width}"
-        )
+        raise ValueError(f"top_k {config.top_k} exceeds hidden width {hidden_width}")
     if config.backend == "pallas" and model_width % config.output_block:
         raise ValueError(
             f"Pallas output_block {config.output_block} must divide model width "
@@ -92,9 +94,7 @@ def _validate_inputs(
         )
 
 
-def topk_relu(
-    preactivations: jax.Array, *, top_k: int
-) -> tuple[jax.Array, jax.Array]:
+def topk_relu(preactivations: jax.Array, *, top_k: int) -> tuple[jax.Array, jax.Array]:
     """Return the nonzero values and indices of a per-row TopK-ReLU.
 
     ReLU is applied first, then exactly ``top_k`` coordinates are retained.
@@ -178,14 +178,11 @@ def _sparse_decode_kernel(
             selected_row_ref,
         )
         value = values_ref[token, slot].astype(jnp.float32)
-        accumulator_ref[token, :] = (
-            accumulator_ref[token, :]
-            + value * selected_row_ref[...].astype(jnp.float32)
-        )
+        accumulator_ref[token, :] = accumulator_ref[
+            token, :
+        ] + value * selected_row_ref[...].astype(jnp.float32)
 
-    output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(
-        output_ref.dtype
-    )
+    output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(output_ref.dtype)
 
 
 def _pallas_sparse_decode_block(
@@ -224,22 +221,16 @@ def _pallas_sparse_decode_block(
                     pl.BlockSpec(memory_space=pltpu.HBM),
                     pl.BlockSpec((1, output_block), bias_index),
                 ),
-                out_specs=pl.BlockSpec(
-                    (token_count, output_block), output_index
-                ),
+                out_specs=pl.BlockSpec((token_count, output_block), output_index),
                 scratch_shapes=(
                     pltpu.VMEM((output_block,), down_weight.dtype),
                     pltpu.VMEM((token_count, output_block), jnp.float32),
                 ),
             ),
-            out_shape=jax.ShapeDtypeStruct(
-                (token_count, output_width), values.dtype
-            ),
+            out_shape=jax.ShapeDtypeStruct((token_count, output_width), values.dtype),
             interpret=interpret,
             debug=debug,
-            compiler_params=pltpu.CompilerParams(
-                dimension_semantics=("parallel",)
-            ),
+            compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",)),
             name="sparse_topk_decode",
         )(
             indices.astype(jnp.int32),
@@ -334,9 +325,7 @@ def _forward_with_selection(
     config: SparseMlpConfig,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     _validate_inputs(x, up_weight, up_bias, down_weight, down_bias, config)
-    hidden = jnp.einsum(
-        "...d,dh->...h", x, up_weight.astype(x.dtype)
-    )
+    hidden = jnp.einsum("...d,dh->...h", x, up_weight.astype(x.dtype))
     hidden = hidden + up_bias.astype(x.dtype)
     values, indices = topk_relu(hidden, top_k=config.top_k)
     if _select_backend(config) == "pallas":
@@ -422,9 +411,9 @@ def _make_sparse_topk_mlp(config: SparseMlpConfig):
         model_width, hidden_width = up_weight.shape
         tokens = math.prod(x.shape[:-1])
         flat_x = x.reshape((tokens, model_width)).astype(jnp.float32)
-        flat_output_cotangent = output_cotangent.reshape(
-            (tokens, model_width)
-        ).astype(jnp.float32)
+        flat_output_cotangent = output_cotangent.reshape((tokens, model_width)).astype(
+            jnp.float32
+        )
         flat_values = values.reshape((tokens, config.top_k)).astype(jnp.float32)
         flat_indices = indices.reshape((tokens, config.top_k))
         up_rows = up_weight.T.astype(jnp.float32)
@@ -442,9 +431,7 @@ def _make_sparse_topk_mlp(config: SparseMlpConfig):
             feature = flat_indices[:, slot]
             value = flat_values[:, slot]
             selected_down = down_rows[feature]
-            value_cotangent = jnp.sum(
-                flat_output_cotangent * selected_down, axis=-1
-            )
+            value_cotangent = jnp.sum(flat_output_cotangent * selected_down, axis=-1)
             # ReLU defines the zero entries selected from an all-negative row
             # to be inactive. Top-k's index choice itself is nondifferentiable.
             preactivation_cotangent = value_cotangent * (value > 0.0)
@@ -456,9 +443,7 @@ def _make_sparse_topk_mlp(config: SparseMlpConfig):
             up_gradient_rows = up_gradient_rows.at[feature].add(
                 preactivation_cotangent[:, None] * flat_x
             )
-            up_bias_gradient = up_bias_gradient.at[feature].add(
-                preactivation_cotangent
-            )
+            up_bias_gradient = up_bias_gradient.at[feature].add(preactivation_cotangent)
             return dx, up_gradient_rows, down_gradient, up_bias_gradient
 
         dx, up_gradient_rows, down_gradient, up_bias_gradient = lax.fori_loop(
@@ -489,14 +474,44 @@ def sparse_topk_mlp(
 ) -> jax.Array:
     """Exact TopK-ReLU MLP with a sparse decoder and sparse custom VJP."""
 
-    return _make_sparse_topk_mlp(config)(
-        x, up_weight, up_bias, down_weight, down_bias
+    return _make_sparse_topk_mlp(config)(x, up_weight, up_bias, down_weight, down_bias)
+
+
+def make_mesh_sparse_topk_mlp(
+    *, config: SparseMlpConfig, mesh: Mesh
+) -> SparseMlpCallable:
+    """Build the explicit data-sharded boundary required by Mosaic kernels.
+
+    Parameters remain replicated. Only the leading token-batch axis is split,
+    so each Pallas invocation sees its chip-local sequences and performs no
+    collectives.
+    """
+
+    def local_operation(x, up_weight, up_bias, down_weight, down_bias):
+        return sparse_topk_mlp(
+            x,
+            up_weight,
+            up_bias,
+            down_weight,
+            down_bias,
+            config=config,
+        )
+
+    batch_partition = P("data", None, None)
+    return jax.shard_map(
+        local_operation,
+        mesh=mesh,
+        in_specs=(batch_partition, P(), P(), P(), P()),
+        out_specs=batch_partition,
+        check_vma=False,
     )
 
 
 __all__ = (
     "Backend",
+    "SparseMlpCallable",
     "SparseMlpConfig",
+    "make_mesh_sparse_topk_mlp",
     "naive_dense_topk_mlp",
     "pallas_sparse_decode",
     "reference_sparse_decode",
