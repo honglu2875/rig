@@ -713,6 +713,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="research override for active TopK-ReLU coordinates per token",
     )
+    sparse.add_argument(
+        "--sparse-mlp-backend",
+        choices=("pallas", "reference"),
+        default=None,
+        help="implementation override for exact TPU kernel comparisons",
+    )
     add_standard_reporting_arguments(optim)
     return parser
 
@@ -861,7 +867,7 @@ def resolve_config(
     dtype_name = training.dtype
     compute_dtype = jnp.bfloat16 if dtype_name == "bfloat16" else jnp.float32
     attention_backend = kernels.attention_backend
-    sparse_mlp_backend = kernels.sparse_mlp_backend
+    sparse_mlp_backend = args.sparse_mlp_backend or kernels.sparse_mlp_backend
     if attention_backend != "dense" and platform != "tpu":
         raise ValueError(
             f"{config_filename} attention_backend {attention_backend} requires a TPU runtime"
