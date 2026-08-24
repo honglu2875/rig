@@ -10,6 +10,14 @@ from .linear_cross_entropy import (
     tiled_tied_cross_entropy,
     tiled_tied_cross_entropy_losses,
 )
+from .sparse_mlp import (
+    SparseMlpConfig,
+    naive_dense_topk_mlp,
+    pallas_sparse_decode,
+    reference_sparse_decode,
+    sparse_topk_mlp,
+    topk_relu,
+)
 from .tpu_flash_attention import (
     AttentionConfig,
     AttentionTiles,
@@ -24,11 +32,17 @@ __all__ = (
     "DEFAULT_VOCAB_TILE_SIZE",
     "AttentionConfig",
     "AttentionTiles",
+    "SparseMlpConfig",
     "attention_tile_candidates",
     "causal_attention",
     "make_causal_attention",
+    "naive_dense_topk_mlp",
+    "pallas_sparse_decode",
     "reference_causal_attention",
+    "reference_sparse_decode",
     "select_attention_tiles",
+    "sparse_topk_mlp",
     "tiled_tied_cross_entropy",
     "tiled_tied_cross_entropy_losses",
+    "topk_relu",
 )
