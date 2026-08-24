@@ -183,7 +183,7 @@ def _sparse_decode_kernel(
             + value * selected_row_ref[...].astype(jnp.float32)
         )
 
-    output_ref[...] = (accumulator_ref[...] + bias_ref[...]).astype(
+    output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(
         output_ref.dtype
     )
 
@@ -205,7 +205,7 @@ def _pallas_sparse_decode_block(
     grid = (output_width // output_block,)
 
     def bias_index(output_index, _indices_ref, _values_ref):
-        return (output_index,)
+        return 0, output_index
 
     def output_index(output_index, _indices_ref, _values_ref):
         return 0, output_index
@@ -222,7 +222,7 @@ def _pallas_sparse_decode_block(
                     # Keep the full decoder matrix in HBM.  The kernel issues
                     # one dynamic row DMA for each selected activation.
                     pl.BlockSpec(memory_space=pltpu.HBM),
-                    pl.BlockSpec((output_block,), bias_index),
+                    pl.BlockSpec((1, output_block), bias_index),
                 ),
                 out_specs=pl.BlockSpec(
                     (token_count, output_block), output_index
@@ -245,7 +245,7 @@ def _pallas_sparse_decode_block(
             indices.astype(jnp.int32),
             values.astype(jnp.float32),
             down_weight,
-            down_bias,
+            down_bias[None, :],
         )
 
 
