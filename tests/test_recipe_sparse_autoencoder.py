@@ -58,9 +58,12 @@ class SparseAutoencoderRecipeTests(unittest.TestCase):
             "8",
             "--sparse-top-k",
             "64",
+            "--sparse-mlp-backend",
+            "reference",
         )
         self.assertEqual(config.mlp_mult, 8)
         self.assertEqual(config.mlp_top_k, 64)
+        self.assertEqual(config.sparse_mlp_backend, "reference")
         self.assertEqual(config.declared_parameters, 74_092_416)
         self.assertEqual(config.data_multiplier, 1.0)
 
