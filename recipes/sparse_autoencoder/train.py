@@ -155,8 +155,10 @@ from rig.flops import (
 )
 from rig.kernels import (
     AttentionConfig,
+    SparseMlpCallable,
     SparseMlpConfig,
     make_causal_attention,
+    make_mesh_sparse_topk_mlp,
     select_attention_tiles,
     sparse_topk_mlp,
     tiled_tied_cross_entropy,
@@ -345,19 +347,13 @@ class ModelDefinition:
         """Enforce architecture relations that no single annotation can express."""
 
         if self.semantic_vocab_size > self.vocab_size:
-            raise ValueError(
-                f"{label}.semantic_vocab_size must not exceed vocab_size"
-            )
+            raise ValueError(f"{label}.semantic_vocab_size must not exceed vocab_size")
         if self.d_model % self.heads:
             raise ValueError(f"{label}.d_model must be divisible by heads")
         if self.head_dim % 2:
-            raise ValueError(
-                f"{label} head dimension must be even for RoPE"
-            )
+            raise ValueError(f"{label} head dimension must be even for RoPE")
         if self.mlp_top_k > self.mlp_mult * self.d_model:
-            raise ValueError(
-                f"{label}.mlp_top_k must not exceed mlp_mult * d_model"
-            )
+            raise ValueError(f"{label}.mlp_top_k must not exceed mlp_mult * d_model")
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,10 +374,7 @@ class TierDefinition:
         return (
             2 * model.vocab_size * width
             + model.layers
-            * (
-                (4 + 2 * mlp_mult) * width * width
-                + (mlp_mult + 7) * width
-            )
+            * ((4 + 2 * mlp_mult) * width * width + (mlp_mult + 7) * width)
             + width
         )
 
@@ -415,9 +408,9 @@ class FamilyDefinition:
     def base_tpp_parameters_for_mlp_mult(self, mlp_mult: int) -> int:
         """Base-tier denominator under the same sparse dictionary width."""
 
-        return self.tiers[
-            self.parameterization.base_tier
-        ].tpp_parameters_for_mlp_mult(mlp_mult)
+        return self.tiers[self.parameterization.base_tier].tpp_parameters_for_mlp_mult(
+            mlp_mult
+        )
 
 
 Sampling = Literal["random_windows", "shuffled_epochs"]
@@ -561,8 +554,7 @@ class ExperimentConfig(ConfigSchema):
                         "divisible by run.kernels.sparse_mlp_output_block"
                     )
                 assignments = (
-                    sparse_kernels.sparse_mlp_token_block
-                    * tier.model.mlp_top_k
+                    sparse_kernels.sparse_mlp_token_block * tier.model.mlp_top_k
                 )
                 if assignments > 65_536:
                     raise ValueError(
@@ -788,9 +780,7 @@ def resolve_config(
     base_tpp_parameters = family.base_tpp_parameters_for_mlp_mult(mlp_mult)
     duration = definition.training.duration
     tpp_parameters = (
-        tier.tpp_parameters_for_mlp_mult(mlp_mult)
-        if duration.is_fixed_tpp
-        else None
+        tier.tpp_parameters_for_mlp_mult(mlp_mult) if duration.is_fixed_tpp else None
     )
     kernels = definition.kernels
     optimizer = definition.optimizer
@@ -1222,6 +1212,7 @@ def gpt_hidden(
     tokens: jax.Array,
     config: Config,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> jax.Array:
     """Return final normalized token representations before the tied head."""
 
@@ -1297,17 +1288,19 @@ def gpt_hidden(
 
         residual = x
         x_norm = rms_norm(x, block["ln2_scale"], dtype)
-        mlp_output = sparse_topk_mlp(
+        mlp_arguments = (
             x_norm,
             block["mlp_up_w"],
             block["mlp_up_b"],
             block["mlp_down_w"],
             block["mlp_down_b"],
-            config=sparse_mlp_config,
         )
-        x = residual + (config.depth_multiplier ** (-config.depth_alpha)) * (
-            mlp_output
+        mlp_output = (
+            sparse_mlp_fn(*mlp_arguments)
+            if sparse_mlp_fn is not None
+            else sparse_topk_mlp(*mlp_arguments, config=sparse_mlp_config)
         )
+        x = residual + (config.depth_multiplier ** (-config.depth_alpha)) * (mlp_output)
 
     return rms_norm(x, params["final_ln_scale"], dtype)
 
@@ -1317,8 +1310,9 @@ def gpt_logits(
     tokens: jax.Array,
     config: Config,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> jax.Array:
-    x = gpt_hidden(params, tokens, config, attention_fn)
+    x = gpt_hidden(params, tokens, config, attention_fn, sparse_mlp_fn)
     output_embedding = params.get("output_embedding", params["token_embedding"])
     return jnp.einsum(
         "btd,vd->btv",
@@ -1333,9 +1327,10 @@ def cross_entropy(
     y: jax.Array,
     config: Config,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> jax.Array:
     if config.loss_backend == "tiled":
-        hidden = gpt_hidden(params, x, config, attention_fn)
+        hidden = gpt_hidden(params, x, config, attention_fn, sparse_mlp_fn)
         return tiled_tied_cross_entropy(
             hidden,
             params.get("output_embedding", params["token_embedding"]),
@@ -1344,7 +1339,7 @@ def cross_entropy(
             vocab_tile_size=config.vocab_tile_size,
             compute_dtype=config.compute_dtype,
         )
-    logits = gpt_logits(params, x, config, attention_fn)[
+    logits = gpt_logits(params, x, config, attention_fn, sparse_mlp_fn)[
         ..., : config.semantic_vocab_size
     ]
     log_probabilities = jax.nn.log_softmax(logits, axis=-1)
@@ -1503,6 +1498,7 @@ def _apply_training_update(
     config: Config,
     decay_mask: Any | None = None,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, jax.Array], Any]:
     """Apply one ordinary update and also return the raw, pre-clip gradient.
 
@@ -1517,7 +1513,9 @@ def _apply_training_update(
     )
     beta1, beta2 = effective_adam_betas(config)
     loss, gradients = jax.value_and_grad(
-        lambda candidate: cross_entropy(candidate, x, y, config, attention_fn)
+        lambda candidate: cross_entropy(
+            candidate, x, y, config, attention_fn, sparse_mlp_fn
+        )
     )(params)
     gradients = jax.tree_util.tree_map(lambda grad: grad.astype(jnp.float32), gradients)
     raw_gradients = gradients
@@ -1601,9 +1599,17 @@ def train_step(
     config: Config,
     decay_mask: Any | None = None,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, jax.Array]]:
     params, optimizer, metrics, _ = _apply_training_update(
-        params, optimizer, x, y, config, decay_mask, attention_fn
+        params,
+        optimizer,
+        x,
+        y,
+        config,
+        decay_mask,
+        attention_fn,
+        sparse_mlp_fn,
     )
     return params, optimizer, metrics
 
@@ -1616,12 +1622,20 @@ def diagnostic_train_step(
     config: Config,
     decay_mask: Any | None = None,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, jax.Array], jax.Array]:
     """Run the same update as :func:`train_step` and emit sparse statistics."""
 
     params_before = params
     params, optimizer, metrics, raw_gradients = _apply_training_update(
-        params, optimizer, x, y, config, decay_mask, attention_fn
+        params,
+        optimizer,
+        x,
+        y,
+        config,
+        decay_mask,
+        attention_fn,
+        sparse_mlp_fn,
     )
     values = diagnostic_values(params_before, raw_gradients, params)
     return params, optimizer, metrics, values
@@ -1634,11 +1648,12 @@ def eval_step(
     mask: jax.Array,
     config: Config,
     attention_fn: AttentionCallable | None = None,
+    sparse_mlp_fn: SparseMlpCallable | None = None,
 ) -> tuple[jax.Array, jax.Array]:
     """Return a loss sum and exact target count for fixed-shape masked eval."""
 
     if config.loss_backend == "tiled":
-        hidden = gpt_hidden(params, x, config, attention_fn)
+        hidden = gpt_hidden(params, x, config, attention_fn, sparse_mlp_fn)
         losses = tiled_tied_cross_entropy_losses(
             hidden,
             params.get("output_embedding", params["token_embedding"]),
@@ -1648,7 +1663,7 @@ def eval_step(
             compute_dtype=config.compute_dtype,
         )
     else:
-        logits = gpt_logits(params, x, config, attention_fn)[
+        logits = gpt_logits(params, x, config, attention_fn, sparse_mlp_fn)[
             ..., : config.semantic_vocab_size
         ]
         log_probabilities = jax.nn.log_softmax(logits, axis=-1)
@@ -1671,22 +1686,20 @@ def sparse_topk_mlp_flop_rule(site: Site) -> int:
     """
 
     if len(site.in_shapes) not in (5, 8):
-        raise FlopError(
-            f"unexpected sparse_topk_mlp boundary shapes: {site.in_shapes}"
-        )
+        raise FlopError(f"unexpected sparse_topk_mlp boundary shapes: {site.in_shapes}")
     x_shape = site.in_shapes[0]
     up_shape = site.in_shapes[1]
     if len(x_shape) < 2 or len(up_shape) != 2:
-        raise FlopError(
-            f"unexpected sparse_topk_mlp operands: {site.in_shapes}"
-        )
+        raise FlopError(f"unexpected sparse_topk_mlp operands: {site.in_shapes}")
     tokens = math.prod(x_shape[:-1])
     model_width, hidden_width = up_shape
     if model_width != x_shape[-1]:
         raise FlopError("sparse_topk_mlp input and encoder widths disagree")
     if len(site.in_shapes) == 5:
         top_k = site.out_shapes[1][-1]
-        return 2 * tokens * model_width * hidden_width + 2 * tokens * top_k * model_width
+        return (
+            2 * tokens * model_width * hidden_width + 2 * tokens * top_k * model_width
+        )
     top_k = site.in_shapes[5][-1]
     return 8 * tokens * top_k * model_width
 
@@ -1732,9 +1745,7 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
     def loss(trainable: Mapping[str, Any]) -> jax.Array:
         return cross_entropy(trainable, tokens, targets, config)
 
-    rules = default_rules().with_scope(
-        "sparse_topk_mlp", sparse_topk_mlp_flop_rule
-    )
+    rules = default_rules().with_scope("sparse_topk_mlp", sparse_topk_mlp_flop_rule)
     return count_training_flops(loss, params, rules=rules)
 
 
@@ -1924,6 +1935,15 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         ),
         document_masking=config.document_masking,
     )
+    sparse_mlp_fn = make_mesh_sparse_topk_mlp(
+        config=SparseMlpConfig(
+            top_k=config.mlp_top_k,
+            backend=config.sparse_mlp_backend,
+            token_block=config.sparse_mlp_token_block,
+            output_block=config.sparse_mlp_output_block,
+        ),
+        mesh=mesh,
+    )
     params = put_replicated_tree(host_params, mesh, replicated, process_count)
     optimizer = put_replicated_tree(host_optimizer, mesh, replicated, process_count)
     del host_params, host_optimizer
@@ -1940,7 +1960,16 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
     )
 
     compiled_step = jax.jit(
-        lambda p, o, x, y: train_step(p, o, x, y, config, decay_mask, attention_fn),
+        lambda p, o, x, y: train_step(
+            p,
+            o,
+            x,
+            y,
+            config,
+            decay_mask,
+            attention_fn,
+            sparse_mlp_fn,
+        ),
         in_shardings=(replicated, replicated, data_sharding, data_sharding),
         donate_argnums=(0, 1),
     )
@@ -1960,7 +1989,14 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         diagnostic_executable = (
             jax.jit(
                 lambda p, o, x, y: diagnostic_train_step(
-                    p, o, x, y, config, decay_mask, attention_fn
+                    p,
+                    o,
+                    x,
+                    y,
+                    config,
+                    decay_mask,
+                    attention_fn,
+                    sparse_mlp_fn,
                 ),
                 in_shardings=(replicated, replicated, data_sharding, data_sharding),
                 donate_argnums=(0, 1),
@@ -1989,7 +2025,15 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         eval_compile_started = time.perf_counter()
         compiled_eval = (
             jax.jit(
-                lambda p, x, y, mask: eval_step(p, x, y, mask, config, attention_fn),
+                lambda p, x, y, mask: eval_step(
+                    p,
+                    x,
+                    y,
+                    mask,
+                    config,
+                    attention_fn,
+                    sparse_mlp_fn,
+                ),
                 in_shardings=(replicated, data_sharding, data_sharding, data_sharding),
             )
             .lower(params, sample_x, sample_y, sample_mask)

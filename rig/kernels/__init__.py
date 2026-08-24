@@ -11,7 +11,9 @@ from .linear_cross_entropy import (
     tiled_tied_cross_entropy_losses,
 )
 from .sparse_mlp import (
+    SparseMlpCallable,
     SparseMlpConfig,
+    make_mesh_sparse_topk_mlp,
     naive_dense_topk_mlp,
     pallas_sparse_decode,
     reference_sparse_decode,
@@ -33,9 +35,11 @@ __all__ = (
     "AttentionConfig",
     "AttentionTiles",
     "SparseMlpConfig",
+    "SparseMlpCallable",
     "attention_tile_candidates",
     "causal_attention",
     "make_causal_attention",
+    "make_mesh_sparse_topk_mlp",
     "naive_dense_topk_mlp",
     "pallas_sparse_decode",
     "reference_causal_attention",
