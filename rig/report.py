@@ -166,6 +166,28 @@ class _Run:
             return []
         return _points(self.training, values)
 
+    def training_scope_mean_points(
+        self, metric: str, scope: str
+    ) -> list[list[float]]:
+        """Return one timeline after averaging a metric across a model scope.
+
+        Some recipe-specific training metrics are naturally recorded per
+        block. The browser needs a compact, comparable overview while the raw
+        log remains authoritative for every individual block.
+        """
+
+        metric_id = metrics_registry.metric(metric).id
+        scope_id = metrics_registry.scope(scope).id
+        positions = [
+            index
+            for index, entry in enumerate(self.training.columns)
+            if entry.metric_id == metric_id and entry.scope_id == scope_id
+        ]
+        if not positions:
+            return []
+        values = np.mean(self.training.values[:, positions], axis=1)
+        return _points(self.training, values)
+
     def diagnostic_points(
         self,
         family: str,
@@ -1095,6 +1117,16 @@ def _report_payload(
             continue
         time_charts.append(_training_chart(runs, spec.metric, spec.title, spec.unit))
 
+    # The local MoE objective and its normalization statistics are recorded
+    # once per routed block. Plot the cross-block mean as the browser overview;
+    # the packed training log preserves each block separately at full fidelity.
+    for spec in _LOCAL_MOE_CHARTS:
+        time_charts.append(
+            _training_scope_mean_chart(
+                runs, spec.metric, spec.title, spec.unit, scope="block"
+            )
+        )
+
     time_charts = [chart for chart in time_charts if chart["series"]]
 
     overall_scope = metrics_registry.scope("overall").id
@@ -1211,6 +1243,17 @@ _ROUTER_CHARTS = (
     SeriesChart("router.logit_rms", "Router logit RMS", "RMS"),
 )
 
+_LOCAL_MOE_CHARTS = (
+    SeriesChart("moe.local_loss", "Mean local MoE objective", "block mean"),
+    SeriesChart("moe.input_rms", "Mean local MoE input RMS", "block mean RMS"),
+    SeriesChart("moe.output_rms", "Mean local MoE output RMS", "block mean RMS"),
+    SeriesChart(
+        "moe.output_gradient_rms",
+        "Mean local MoE output-gradient RMS",
+        "block mean RMS",
+    ),
+)
+
 
 def _hardware(result: Mapping[str, Any]) -> dict[str, Any]:
     """Chip kind, process count, and device count, when the run recorded them."""
@@ -1237,6 +1280,31 @@ def _training_chart(
             limit = int(run.result.get("_report_point_limit", _MAX_CHART_POINTS))
             # The report opens in equi-FLOP mode, so point selection must preserve
             # shape in that coordinate rather than silently optimizing for steps.
+            points = _lttb(points, limit, x_index=1)
+            series.append({"run": run.run_id, "points": points})
+    return {
+        "key": metric,
+        "title": title,
+        "yLabel": y_label,
+        "series": series,
+    }
+
+
+def _training_scope_mean_chart(
+    runs: Sequence[_Run],
+    metric: str,
+    title: str,
+    y_label: str,
+    *,
+    scope: str,
+) -> dict[str, Any]:
+    """Build a timeline from a per-scope training metric's arithmetic mean."""
+
+    series: list[dict[str, Any]] = []
+    for run in runs:
+        points = run.training_scope_mean_points(metric, scope)
+        if points:
+            limit = int(run.result.get("_report_point_limit", _MAX_CHART_POINTS))
             points = _lttb(points, limit, x_index=1)
             series.append({"run": run.run_id, "points": points})
     return {
@@ -1660,8 +1728,24 @@ def _study_run_name(
             return ""
         compact_strength = format(strength, ".12g").replace(".", "p")
         load_scaling = f"-load-{mode}-c{compact_strength}"
+    local_moe = ""
+    local_optimization = (result.get("implementation") or {}).get(
+        "local_moe_optimization"
+    )
+    if local_optimization is not None:
+        if not isinstance(local_optimization, Mapping):
+            return ""
+        local_steps = local_optimization.get("steps")
+        if (
+            isinstance(local_steps, bool)
+            or not isinstance(local_steps, int)
+            or local_steps < 0
+        ):
+            return ""
+        local_moe = f"-local-k{local_steps}"
     return (
-        f"{tier}{routed}{duration}{load_scaling}{decay}-{tpp}tpp-bs{batch}-lr2e{exponent}"
+        f"{tier}{routed}{duration}{local_moe}{load_scaling}{decay}"
+        f"-{tpp}tpp-bs{batch}-lr2e{exponent}"
         f"-s{result.get('seed')}"
     )
 

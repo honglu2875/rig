@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 406 runs across sixteen studies, laid out as `<study>/<run-name>/`, at full
+— 414 runs across seventeen studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -51,6 +51,7 @@ by-product:
 | moe-ablations | 480 bins | — | 0.07 MB |
 | expert-load-scaling | exact endpoints | — | 0.02 MB |
 | moe-weight-decay | exact endpoints | — | 0.04 MB |
+| gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.03 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -91,6 +92,13 @@ the study browser carries the complete trajectories separately.
 three-seed means, sample-SD whiskers, and same-seed differences. Its 40 KiB
 page is static inline SVG with no runtime JavaScript or fetch; the study
 browser carries the complete trajectories separately.
+
+`gumbel-local-moe.html` is a prose-led mechanism report over eight runs. Its
+three figures use exact validation endpoints, recorded cost multipliers,
+last-200-step permutation-invariant router summaries, and the first identical
+update diagnostic. The 27 KiB page is static inline SVG with no runtime
+JavaScript or fetch. The study browser adds mean-across-block timelines for the
+four local-objective metrics; raw logs preserve every block separately.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -156,6 +164,9 @@ The expert-load scaling study is likewise entirely TPU v4 at 4 processes and
 The MoE weight-decay study is entirely TPU v4 at 4 processes and 16 chips.
 Every decay cell uses seeds 1337–1339 on that same topology.
 
+The Gumbel-local MoE study also uses TPU v4 at 4 processes and 16 chips for all
+eight arms. Its K=0/K=2 comparison is paired within that topology.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -173,6 +184,7 @@ Every decay cell uses seeds 1337–1339 on that same topology.
 | [moe-ablations](moe-ablations.html) | 23 | 60M/125M/250M | learned biases; router auxiliary-loss coefficient | [`moe-no-bias`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-no-bias), [`moe-router-aux-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-router-aux-125M) |
 | [expert-load-scaling](expert-load-scaling.html) | 5 | 125M | per-expert gradient/update scaling by current load | [`moe-expert-load-scaling-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-expert-load-scaling-125M) |
 | [moe-weight-decay](moe-weight-decay.html) | 36 | 60M/125M | base AdamW weight decay × seed | [`moe-weight-decay`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-weight-decay) |
+| [gumbel-local-moe](gumbel-local-moe.html) | 8 | 125M | Gumbel-routed local MoE steps × seed | [`moe-gumbel-local-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -582,6 +594,50 @@ for tier in 60m 125m; do
         --weight-decay "$wd"
     done
   done
+done
+```
+
+## gumbel-local-moe.html
+
+Eight verified 125M runs test `K={0,1,2,4}` extra optimization steps inside
+every routed block. K=0 and K=2 have matched seeds 1350, 1369, and 1388; K=1
+and K=4 are seed-1350 shape probes. Each inner step draws a fresh hard Gumbel
+top-2 route, retains clean mixture weights, and applies raw stateless SGD to a
+single activation/output-gradient-normalized objective. The ordinary outer
+AdamW update still occurs exactly once.
+
+The prose-led [findings report](gumbel-local-moe.html) explains why the primary
+result is endpoint-neutral but mechanistically informative. K=2 changes the
+three-seed validation mean by +0.000021 nats while costing 1.344× traced FLOPs
+and 1.971× training time. Router balance improves modestly, but clean entropy
+falls and logit RMS rises, consistent with the router building margins against
+the perturbation. More decisively, the first identical actual-update L2 norm
+changes by only 4.9 parts per million for K=2: the raw-SGD local vector is tiny
+beside the AdamW update it is meant to supplement.
+
+This rejects the exact normalization/SGD realization, not all extra-compute
+MoE exploration. A useful follow-up should normalize the local delta against
+the observed outer MoE delta or its output displacement, then record the two
+contributions separately. Parameter/gradient/update diagnostics in this study
+are block-scoped only; per-expert router loads remain complete.
+
+The full grid is clean at commit
+`28df45b92ad4f56b0519ea01b4c3f3e95d3b73fa`:
+
+```bash
+for cell in \
+  0:1350 0:1369 0:1388 \
+  2:1350 2:1369 2:1388 \
+  1:1350 4:1350
+do
+  k=${cell%%:*}
+  seed=${cell##*:}
+  uv run --frozen --no-sync rig run gumbel_local_moe \
+    --context 8k --cluster v4-32 --profile dev \
+    --tier 125m --tokens-per-parameter 5 --batch-size 16 \
+    --base-learning-rate 0.00390625 --seed "$seed" \
+    --checkpoint-policy none --name "125m-k${k}-s${seed}" -- \
+    --local-moe-steps "$k"
 done
 ```
 
