@@ -187,9 +187,12 @@ def _sparse_decode_kernel(
             selected_tile_ref,
         )
         selected_tile = selected_tile_ref[...].astype(jnp.float32)
-        row_mask = (jnp.arange(TPU_BF16_SUBLANES, dtype=feature.dtype) == row_in_tile)[
-            :, None
-        ]
+        row_ids = lax.broadcasted_iota(
+            feature.dtype,
+            selected_tile.shape,
+            dimension=0,
+        )
+        row_mask = row_ids == row_in_tile
         selected_row = jnp.sum(jnp.where(row_mask, selected_tile, 0.0), axis=0)
         value = values_ref[token, slot].astype(jnp.float32)
         accumulator_ref[token, :] = accumulator_ref[token, :] + value * selected_row
