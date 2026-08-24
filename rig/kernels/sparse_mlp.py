@@ -156,48 +156,42 @@ def naive_dense_topk_mlp(
 def _sparse_decode_kernel(
     indices_ref,
     values_ref,
-    down_weight_ref,
+    down_tile_ref,
     bias_ref,
     output_ref,
-    selected_tile_ref,
     accumulator_ref,
 ) -> None:
-    """Decode one token block and output tile by DMAing selected rows only."""
+    """Accumulate one selected row in an automatically pipelined grid."""
 
     token_count, top_k = values_ref.shape
-    output_width = output_ref.shape[-1]
-    output_start = pl.program_id(0) * output_width
-    accumulator_ref[...] = jnp.zeros(accumulator_ref.shape, jnp.float32)
+    assignment = pl.program_id(1)
 
-    @pl.loop(0, token_count * top_k, unroll=False)
-    def visit_assignment(assignment) -> None:
-        token = assignment // top_k
-        slot = assignment % top_k
-        feature = indices_ref[token, slot]
-        row_in_tile = feature % TPU_BF16_SUBLANES
-        tile_start = pl.multiple_of(
-            feature - row_in_tile,
-            TPU_BF16_SUBLANES,
-        )
-        pltpu.sync_copy(
-            down_weight_ref.at[
-                pl.ds(tile_start, TPU_BF16_SUBLANES),
-                pl.ds(output_start, output_width),
-            ],
-            selected_tile_ref,
-        )
-        selected_tile = selected_tile_ref[...].astype(jnp.float32)
-        row_ids = lax.broadcasted_iota(
-            feature.dtype,
-            selected_tile.shape,
-            dimension=0,
-        )
-        row_mask = row_ids == row_in_tile
-        selected_row = jnp.sum(jnp.where(row_mask, selected_tile, 0.0), axis=0)
-        value = values_ref[token, slot].astype(jnp.float32)
-        accumulator_ref[token, :] = accumulator_ref[token, :] + value * selected_row
+    @pl.when(assignment == 0)
+    def initialize_accumulator() -> None:
+        accumulator_ref[...] = jnp.zeros(accumulator_ref.shape, jnp.float32)
 
-    output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(output_ref.dtype)
+    token = assignment // top_k
+    slot = assignment % top_k
+    feature = indices_ref[token, slot]
+    row_in_tile = feature % TPU_BF16_SUBLANES
+    selected_tile = down_tile_ref[...].astype(jnp.float32)
+    row_ids = lax.broadcasted_iota(
+        feature.dtype,
+        selected_tile.shape,
+        dimension=0,
+    )
+    selected_row = jnp.sum(
+        jnp.where(row_ids == row_in_tile, selected_tile, 0.0),
+        axis=0,
+    )
+    value = values_ref[token, slot].astype(jnp.float32)
+    accumulator_ref[token, :] = accumulator_ref[token, :] + value * selected_row
+
+    @pl.when(assignment == pl.num_programs(1) - 1)
+    def store_output() -> None:
+        output_ref[...] = (accumulator_ref[...] + bias_ref[0, :]).astype(
+            output_ref.dtype
+        )
 
 
 def _pallas_sparse_decode_block(
@@ -210,16 +204,23 @@ def _pallas_sparse_decode_block(
     interpret: bool,
     debug: bool,
 ) -> jax.Array:
-    """Decode a fixed token block using one indirect DMA per output tile."""
+    """Decode a fixed token block with a pipelined sparse gather grid."""
 
     token_count, top_k = values.shape
     _, output_width = down_weight.shape
-    grid = (output_width // output_block,)
+    assignments = token_count * top_k
+    grid = (output_width // output_block, assignments)
 
-    def bias_index(output_index, _indices_ref, _values_ref):
+    def weight_index(output_index, assignment, indices_ref, _values_ref):
+        token = assignment // top_k
+        slot = assignment % top_k
+        feature_tile = indices_ref[token, slot] // TPU_BF16_SUBLANES
+        return feature_tile, output_index
+
+    def bias_index(output_index, _assignment, _indices_ref, _values_ref):
         return 0, output_index
 
-    def output_index(output_index, _indices_ref, _values_ref):
+    def output_index(output_index, _assignment, _indices_ref, _values_ref):
         return 0, output_index
 
     with jax.named_scope("sparse_topk_decoder"):
@@ -231,23 +232,22 @@ def _pallas_sparse_decode_block(
                 num_scalar_prefetch=2,
                 grid=grid,
                 in_specs=(
-                    # Keep the full decoder matrix in HBM.  The kernel issues
-                    # one dynamic row DMA for each selected activation.
-                    pl.BlockSpec(memory_space=pltpu.HBM),
+                    # Exact unit-level sparsity maps each selected feature to
+                    # its physical eight-row BF16 HBM tile. Assignments are the
+                    # inner grid axis so Pallas overlaps dynamic transfers and
+                    # keeps the output accumulator resident in VMEM.
+                    pl.BlockSpec((TPU_BF16_SUBLANES, output_block), weight_index),
                     pl.BlockSpec((1, output_block), bias_index),
                 ),
                 out_specs=pl.BlockSpec((token_count, output_block), output_index),
-                scratch_shapes=(
-                    # BF16 HBM rows are physically tiled eight at a time. Load
-                    # one aligned tile, then select the requested row in VMEM.
-                    pltpu.VMEM((TPU_BF16_SUBLANES, output_block), down_weight.dtype),
-                    pltpu.VMEM((token_count, output_block), jnp.float32),
-                ),
+                scratch_shapes=(pltpu.VMEM((token_count, output_block), jnp.float32),),
             ),
             out_shape=jax.ShapeDtypeStruct((token_count, output_width), values.dtype),
             interpret=interpret,
             debug=debug,
-            compiler_params=pltpu.CompilerParams(dimension_semantics=("parallel",)),
+            compiler_params=pltpu.CompilerParams(
+                dimension_semantics=("parallel", "arbitrary")
+            ),
             name="sparse_topk_decode",
         )(
             indices.astype(jnp.int32),
@@ -271,9 +271,10 @@ def pallas_sparse_decode(
     """Chunked exact sparse decode without materializing ``[..., k, d]``.
 
     ``indices`` and ``values`` for one token block are scalar-prefetched into
-    TPU SMEM.  The kernel then DMA-loads exactly the selected rows of
-    ``down_weight`` for each output tile.  Chunking bounds both SMEM and VMEM
-    use independently of sequence length.
+    TPU SMEM. The assignment grid pipelines the aligned eight-row BF16 tile
+    containing each selected decoder row, selects that row in VMEM, and retains
+    the FP32 output accumulator across all assignments. Chunking bounds both
+    SMEM and VMEM use independently of sequence length.
     """
 
     prefix = values.shape[:-1]
