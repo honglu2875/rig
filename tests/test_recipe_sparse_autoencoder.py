@@ -50,11 +50,13 @@ class SparseAutoencoderRecipeTests(unittest.TestCase):
         self.assertEqual(config.steps, 3_908)
         validate_recipe_plan(trainer.resolved_plan_metadata(config))
 
-    def test_recipe_local_overrides_change_only_the_intended_contract(self) -> None:
+    def test_recipe_local_overrides_resolve_depth_and_explicit_horizon(self) -> None:
         config = resolved(
             "dev",
             "--tier",
             "60m",
+            "--sparse-layers",
+            "13",
             "--sparse-mlp-mult",
             "8",
             "--sparse-top-k",
@@ -63,13 +65,38 @@ class SparseAutoencoderRecipeTests(unittest.TestCase):
             "reference",
             "--sparse-mlp-output-block",
             "384",
+            "--sparse-training-steps",
+            "2267",
         )
+        self.assertEqual(config.layers, 13)
         self.assertEqual(config.mlp_mult, 8)
         self.assertEqual(config.mlp_top_k, 64)
         self.assertEqual(config.sparse_mlp_backend, "reference")
         self.assertEqual(config.sparse_mlp_output_block, 384)
-        self.assertEqual(config.declared_parameters, 74_092_416)
+        self.assertEqual(config.declared_parameters, 77_047_296)
+        self.assertEqual(config.steps, 2_267)
+        self.assertAlmostEqual(
+            config.target_tokens_per_parameter,
+            2_267 * 16 * 8_192 / 77_047_296,
+        )
         self.assertEqual(config.data_multiplier, 1.0)
+        validate_recipe_plan(trainer.resolved_plan_metadata(config))
+
+    def test_explicit_steps_reject_a_second_duration_coordinate(self) -> None:
+        parser = trainer.build_parser()
+        args = parser.parse_args(
+            [
+                "--profile",
+                "dev",
+                "--tokens-per-parameter",
+                "5",
+                "--sparse-training-steps",
+                "100",
+            ]
+        )
+        document, _ = trainer.load_experiment_config("dev")
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            trainer.validate_args(args, document)
 
     def test_stored_parameter_formula_tracks_dictionary_width(self) -> None:
         tier = trainer.load_experiment_config("smoke")[0].family.tiers["smoke"]
@@ -84,12 +111,23 @@ class SparseAutoencoderRecipeTests(unittest.TestCase):
             + model.d_model
         )
         self.assertEqual(tier.tpp_parameters, expected)
+        extra_layer = (
+            (4 + 2 * model.mlp_mult) * model.d_model**2
+            + (model.mlp_mult + 7) * model.d_model
+        )
+        self.assertEqual(
+            tier.stored_parameters(
+                layers=model.layers + 1,
+                mlp_mult=model.mlp_mult,
+            ),
+            expected + extra_layer,
+        )
 
     def test_sparse_flop_rule_counts_forward_and_vjp_contract(self) -> None:
         config = resolved("smoke")
         params = trainer.init_params(config, 3)
         breakdown = trainer.traced_flops(config, params)
-        sparse = breakdown.by_site["sparse_topk_mlp"]
+        sparse = breakdown.by_site["_selected_sparse_topk_mlp"]
         tokens = config.seq_len
         d = config.d_model
         h = config.mlp_mult * d

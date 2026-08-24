@@ -101,6 +101,38 @@ class SparseMlpKernelTests(unittest.TestCase):
                     atol=1e-6,
                 )
 
+    def test_full_support_fast_path_matches_literal_topk_and_gradients(self) -> None:
+        inputs = self.inputs()
+        top_k = inputs[1].shape[1]
+        config = SparseMlpConfig(top_k=top_k, backend="reference")
+        cotangent = jax.random.normal(jax.random.key(7), inputs[0].shape) * 0.1
+
+        def actual_loss(*operands):
+            return jnp.sum(sparse_topk_mlp(*operands, config=config) * cotangent)
+
+        def expected_loss(*operands):
+            return jnp.sum(
+                naive_dense_topk_mlp(*operands, top_k=top_k) * cotangent
+            )
+
+        np.testing.assert_allclose(
+            sparse_topk_mlp(*inputs, config=config),
+            naive_dense_topk_mlp(*inputs, top_k=top_k),
+            rtol=2e-5,
+            atol=2e-6,
+        )
+        for actual_gradient, expected_gradient in zip(
+            jax.grad(actual_loss, argnums=(0, 1, 2, 3, 4))(*inputs),
+            jax.grad(expected_loss, argnums=(0, 1, 2, 3, 4))(*inputs),
+            strict=True,
+        ):
+            np.testing.assert_allclose(
+                actual_gradient,
+                expected_gradient,
+                rtol=2e-5,
+                atol=1e-6,
+            )
+
     def test_configuration_rejects_invalid_static_kernel_contracts(self) -> None:
         with self.assertRaisesRegex(ValueError, "top_k must be positive"):
             SparseMlpConfig(top_k=0)

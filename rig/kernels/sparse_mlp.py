@@ -481,7 +481,7 @@ def _make_sparse_topk_mlp(config: SparseMlpConfig):
 
 
 @functools.partial(jax.jit, static_argnames=("config",))
-def sparse_topk_mlp(
+def _selected_sparse_topk_mlp(
     x: jax.Array,
     up_weight: jax.Array,
     up_bias: jax.Array,
@@ -493,6 +493,57 @@ def sparse_topk_mlp(
     """Exact TopK-ReLU MLP with a sparse decoder and sparse custom VJP."""
 
     return _make_sparse_topk_mlp(config)(x, up_weight, up_bias, down_weight, down_bias)
+
+
+@jax.jit
+def _dense_relu_mlp(
+    x: jax.Array,
+    up_weight: jax.Array,
+    up_bias: jax.Array,
+    down_weight: jax.Array,
+    down_bias: jax.Array,
+) -> jax.Array:
+    """Dense fast path for the exact, full-support TopK endpoint."""
+
+    hidden = jnp.einsum("...d,dh->...h", x, up_weight.astype(x.dtype))
+    hidden = jax.nn.relu(hidden + up_bias.astype(x.dtype))
+    output = jnp.einsum("...h,hd->...d", hidden, down_weight.astype(x.dtype))
+    return (output + down_bias.astype(x.dtype)).astype(x.dtype)
+
+
+def sparse_topk_mlp(
+    x: jax.Array,
+    up_weight: jax.Array,
+    up_bias: jax.Array,
+    down_weight: jax.Array,
+    down_bias: jax.Array,
+    *,
+    config: SparseMlpConfig,
+) -> jax.Array:
+    """Exact TopK-ReLU MLP with dense and selected-row execution paths.
+
+    Selecting the complete dictionary is mathematically just a dense ReLU MLP.
+    Avoiding a pointless full sort, gather, and sparse VJP makes that endpoint
+    a faithful activation control rather than a systems penalty.
+    """
+
+    _validate_inputs(x, up_weight, up_bias, down_weight, down_bias, config)
+    if config.top_k == up_weight.shape[1]:
+        return _dense_relu_mlp(
+            x,
+            up_weight,
+            up_bias,
+            down_weight,
+            down_bias,
+        )
+    return _selected_sparse_topk_mlp(
+        x,
+        up_weight,
+        up_bias,
+        down_weight,
+        down_bias,
+        config=config,
+    )
 
 
 def make_mesh_sparse_topk_mlp(
