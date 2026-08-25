@@ -1,9 +1,9 @@
 # TPU kernels
 
-The shared kernel package contains two trainable building blocks: causal TPU
-FlashAttention and a memory-bounded tied output projection with cross entropy.
-They are common infrastructure; model and optimization choices remain in each
-recipe's `train.py`.
+The shared kernel package contains three trainable building blocks: causal TPU
+FlashAttention, exact TopK-ReLU selection, and a memory-bounded tied output
+projection with cross entropy. They are common infrastructure; model and
+optimization choices remain in each recipe's `train.py`.
 
 Both kernels have dense correctness oracles and explicit static tile sizes.
 Treat the defaults as good seeds for the repository's GPT-2-small shape, not as
@@ -59,6 +59,58 @@ the forward q/kv major and compute blocks, dK/dV q/kv major and compute blocks,
 and dQ q/kv and kv-compute blocks. `attention_tile_candidates` returns a bounded
 set of legal TPU candidates; `select_attention_tiles` returns a deterministic
 shape heuristic without benchmarking.
+
+## Exact TopK-ReLU selection
+
+[`rig.kernels.sparse_mlp`](../rig/kernels/sparse_mlp.py) supplies the
+`sparse_autoencoder` recipe's dense encoder, exact TopK-ReLU support, and
+decoder. The production v4 choice is explicit:
+
+```python
+from rig.kernels import SparseMlpConfig, sparse_topk_mlp
+
+output = sparse_topk_mlp(
+    x, up_weight, up_bias, down_weight, down_bias,
+    config=SparseMlpConfig(
+        top_k=1536,
+        backend="pallas_masked",
+        token_block=128,
+    ),
+)
+```
+
+`pallas_masked` requires BF16 activations and a dictionary width divisible by
+128. Nonnegative BF16 bit patterns preserve numerical order. The Pallas kernel
+packs each value with the reverse column index, reproducing `lax.top_k`'s
+stable lower-index tie break, and binary-searches the unique packed kth key in
+VMEM. It emits a dense array containing the exact selected values and zero
+elsewhere. Its custom VJP masks the activation cotangent, including ReLU's zero
+derivative for nominally selected zeros.
+
+The name is intentionally literal: the selector is sparse, but the following
+decoder is a dense zero-masked MXU matmul. TPU v4 has no efficient
+token-dependent element-sparse matrix-multiply path; gathering different
+decoder rows for every token moved far more data than simply multiplying the
+dense zero-masked activation. Thus `pallas_masked` preserves the TopK algorithm
+and zero gradients outside its support, but it executes decoder FLOPs for the
+complete dictionary. Run provenance records this as
+`sparse_mlp_decoder_execution=dense_zero_masked_mxu`, while scientific FLOP
+accounting remains backend-independent and bills the selected `k` coordinates.
+
+The configured `token_block` is a preferred maximum. Resolution lowers it in
+multiples of eight as dictionary width grows, keeping the input, output, and
+packed-key windows inside v4's 16 MiB VMEM. `reference` remains the gathered
+JAX oracle with a sparse custom VJP. The older `pallas` selected-row decoder is
+retained as an explicit research prototype; it is not the default.
+
+At the 8k 60M comparison shape (`D=384`, `H=6144`, `K=1536`, one sequence per
+device), value plus all MLP gradients fell from 446.3 ms with the gathered
+reference path to 2.77 ms with `pallas_masked`; the 4D dense MLP took 0.54 ms.
+A complete synthetic four-device step measured 99.3 ms for the 12-layer 4D
+dense control and 124.1 ms for the equi-FLOP 11-layer 16D/K4D model: 80.0% of
+dense throughput, versus 1.75% for the former gathered implementation on the
+earlier v4-32 run. These timings are systems measurements, not loss results,
+and the dense versus gathered accumulation order is not bit-equal.
 
 ## Tiled tied cross entropy
 
