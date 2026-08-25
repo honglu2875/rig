@@ -103,14 +103,21 @@ packed-key windows inside v4's 16 MiB VMEM. `reference` remains the gathered
 JAX oracle with a sparse custom VJP. The older `pallas` selected-row decoder is
 retained as an explicit research prototype; it is not the default.
 
-At the 8k 60M comparison shape (`D=384`, `H=6144`, `K=1536`, one sequence per
-device), value plus all MLP gradients fell from 446.3 ms with the gathered
-reference path to 2.77 ms with `pallas_masked`; the 4D dense MLP took 0.54 ms.
+At the 8k comparison anchored to the 60M dense model (`D=384`, `H=6144`,
+`K=1536`, one sequence per device), value plus all MLP gradients fell from
+446.3 ms with the gathered reference path to 2.77 ms with `pallas_masked`; the
+4D dense MLP took 0.54 ms.
 A complete synthetic four-device step measured 99.3 ms for the 12-layer 4D
 dense control and 124.1 ms for the equi-FLOP 11-layer 16D/K4D model: 80.0% of
 dense throughput, versus 1.75% for the former gathered implementation on the
 earlier v4-32 run. These timings are systems measurements, not loss results,
 and the dense versus gathered accumulation order is not bit-equal.
+
+The anchor name is not a stored-parameter claim. The 12-layer dense control
+stores 59,918,208 parameters. The compute-matched 11-layer 16D/K4D treatment
+stores 97,123,584; counting only selected MLP columns and rows gives 58,144,512
+conventionally active parameters per token. It is therefore close to the dense
+control in selected-active parameters, but it is not a 60M-parameter model.
 
 Production-style parameter/optimizer donation measured 91.0 ms and 114.4 ms
 for the same pair, preserving 79.6% of dense throughput. The masked backend's
