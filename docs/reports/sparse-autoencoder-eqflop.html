@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sparse TopK MLP — an equal-algorithmic-FLOP study</title>
+  <meta name="description" content="A 13-run study of overcomplete TopK-ReLU transformer MLPs at a fixed 221 PFLOP algorithmic training budget.">
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f2ec;
+      --card: #fffdf8;
+      --ink: #24251f;
+      --muted: #6e7067;
+      --line: #d9d3c8;
+      --green: #276b55;
+      --green-soft: #e4efe8;
+      --rust: #a24d31;
+      --blue: #356d92;
+      --gold: #a1771a;
+      --violet: #66518f;
+      --shadow: 0 16px 44px rgba(48, 42, 31, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 88% 2%, rgba(39, 107, 85, .10), transparent 28rem),
+        var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.66;
+    }
+    main { width: min(1120px, calc(100% - 36px)); margin: 0 auto; padding: 54px 0 84px; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(260px, .65fr);
+      gap: 34px;
+      align-items: end;
+      padding: 56px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 253, 248, .92);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--green);
+      font-size: .77rem;
+      font-weight: 750;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; line-height: 1.12; }
+    h1 { max-width: 780px; margin: 0; font-size: clamp(2.45rem, 5.7vw, 5.25rem); letter-spacing: -.045em; }
+    h2 { margin: 0 0 20px; font-size: clamp(1.7rem, 3vw, 2.45rem); letter-spacing: -.025em; }
+    h3 { margin: 0 0 10px; font-size: 1.2rem; }
+    .dek { max-width: 760px; margin: 24px 0 0; color: #4d5048; font-size: 1.12rem; }
+    .hero-note {
+      padding: 22px 24px;
+      border-left: 3px solid var(--green);
+      background: var(--green-soft);
+      color: #315044;
+      font-size: .94rem;
+    }
+    .hero-note strong { display: block; margin-bottom: 6px; color: #1d4638; }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin: 18px 0 68px;
+    }
+    .fact {
+      min-height: 128px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--card);
+    }
+    .fact span { display: block; color: var(--muted); font-size: .76rem; font-weight: 720; letter-spacing: .08em; text-transform: uppercase; }
+    .fact strong { display: block; margin-top: 9px; font-family: Georgia, "Times New Roman", serif; font-size: 1.7rem; font-variant-numeric: tabular-nums; }
+    section { margin: 72px 0; }
+    .prose { max-width: 790px; }
+    p { margin: 0 0 17px; }
+    a { color: var(--green); text-underline-offset: 3px; }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .91em;
+    }
+    .formula {
+      margin: 25px 0;
+      padding: 24px 26px;
+      overflow-x: auto;
+      border: 1px solid #cbc5b9;
+      border-radius: 13px;
+      background: #262923;
+      color: #f5f2e9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: clamp(.83rem, 1.6vw, 1rem);
+      line-height: 1.75;
+      white-space: pre;
+    }
+    .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+    .panel {
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: var(--card);
+    }
+    .panel p:last-child { margin-bottom: 0; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 15px; background: var(--card); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid #e8e3da; text-align: right; white-space: nowrap; }
+    th { background: #eeebe4; color: #5d6058; font-size: .74rem; font-weight: 750; letter-spacing: .055em; text-transform: uppercase; }
+    th:first-child, td:first-child { text-align: left; }
+    tr:last-child td { border-bottom: 0; }
+    tr.best td { background: #e7f1ea; color: #214c3d; font-weight: 700; }
+    tr.control td { background: #f7eee8; }
+    .chart-card {
+      padding: 18px 18px 12px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      box-shadow: 0 9px 26px rgba(48, 42, 31, .045);
+    }
+    .chart-head { display: flex; justify-content: space-between; gap: 24px; align-items: baseline; padding: 8px 10px 2px; }
+    .chart-head p { margin: 0; color: var(--muted); font-size: .86rem; }
+    svg { display: block; width: 100%; height: auto; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 4px 12px 14px; color: #5b5d55; font-size: .8rem; }
+    .key { display: inline-flex; align-items: center; gap: 7px; }
+    .swatch { width: 16px; height: 3px; border-radius: 4px; background: currentColor; }
+    .callout {
+      margin: 30px 0;
+      padding: 25px 29px;
+      border: 1px solid #bfd3c7;
+      border-radius: 14px;
+      background: var(--green-soft);
+      color: #29473c;
+    }
+    .callout strong { color: #173e30; }
+    .caveat { border-left: 4px solid var(--rust); padding: 3px 0 3px 22px; color: #565149; }
+    .small { color: var(--muted); font-size: .88rem; }
+    .footer { margin-top: 86px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    @media (max-width: 820px) {
+      .hero { grid-template-columns: 1fr; padding: 34px 27px; }
+      .facts { grid-template-columns: 1fr 1fr; }
+      .grid-two { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      main { width: min(100% - 22px, 1120px); padding-top: 22px; }
+      .facts { grid-template-columns: 1fr; }
+      .fact { min-height: auto; }
+      th, td { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">60M geometry · 13 runs · seed 1350</p>
+      <h1>Sparse capacity at a fixed algorithmic budget</h1>
+      <p class="dek">An overcomplete TopK-ReLU MLP improves validation loss when dictionary width, retained width, transformer depth, and schedule length are balanced against the same 221 PFLOP contraction budget. The kernel is not yet practical; the algorithmic signal is.</p>
+    </div>
+    <aside class="hero-note">
+      <strong>Scope of the claim</strong>
+      Equal traced model FLOPs under a declared sparse-contraction rule. Not equal wall time, not equal parameter count, and not hardware-equivalent sparse execution.
+    </aside>
+  </header>
+
+  <div class="facts" aria-label="Study summary">
+    <div class="fact"><span>Best validation loss</span><strong>3.910170</strong></div>
+    <div class="fact"><span>Gain over dense</span><strong>−0.090275</strong></div>
+    <div class="fact"><span>Common budget</span><strong>221.03 PF</strong></div>
+    <div class="fact"><span>Budget mismatch</span><strong>&lt; 0.02%</strong></div>
+  </div>
+
+  <section>
+    <div class="prose">
+      <p class="eyebrow">The result</p>
+      <h2>A wide dictionary with moderate activity wins</h2>
+      <p>The best treatment stores <code>H=16D</code> features but retains only <code>K=D</code> per token. At twelve layers it reaches 3.910170 validation loss, compared with 4.000445 for the twelve-layer, 4× GELU reference. That is 0.090275 nats, or 8.63% perplexity, at essentially identical algorithmic training compute.</p>
+      <p>The pattern is more useful than the winning cell. All <code>H=16D</code> treatments with <code>K∈{D,2D,4D}</code> beat dense by 0.070–0.090 nats, and <code>H=8D</code> with <code>K∈{D,2D}</code> improves by about 0.064–0.066. Very aggressive <code>K=D/4</code> sparsity gives much of that back. Meanwhile <code>H=4D,K=4D</code> is an exact dense-ReLU control and is 0.0165 nats worse than the GELU reference, so this is not a generic ReLU benefit.</p>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-head">
+        <div><h3>Validation endpoint by retained width</h3><p>Lower is better; every point is approximately 221.03 PFLOPs.</p></div>
+      </div>
+      <svg viewBox="0 0 760 455" role="img" aria-labelledby="chart-title chart-desc">
+        <title id="chart-title">Validation loss across dictionary and retained widths</title>
+        <desc id="chart-desc">H equals sixteen D performs best at K equal to D, with a validation loss of 3.910170.</desc>
+        <rect x="0" y="0" width="760" height="455" rx="12" fill="#fffdf8"/>
+        <g stroke="#e3ded5" stroke-width="1">
+          <line x1="92" y1="52" x2="704" y2="52"/><line x1="92" y1="116" x2="704" y2="116"/>
+          <line x1="92" y1="180" x2="704" y2="180"/><line x1="92" y1="244" x2="704" y2="244"/>
+          <line x1="92" y1="308" x2="704" y2="308"/><line x1="92" y1="372" x2="704" y2="372"/>
+        </g>
+        <g fill="#6e7067" font-family="system-ui, sans-serif" font-size="12">
+          <text x="79" y="56" text-anchor="end">4.025</text><text x="79" y="120" text-anchor="end">4.000</text>
+          <text x="79" y="184" text-anchor="end">3.975</text><text x="79" y="248" text-anchor="end">3.950</text>
+          <text x="79" y="312" text-anchor="end">3.925</text><text x="79" y="376" text-anchor="end">3.900</text>
+          <text x="145" y="412" text-anchor="middle">D/4</text><text x="315" y="412" text-anchor="middle">D</text>
+          <text x="485" y="412" text-anchor="middle">2D</text><text x="655" y="412" text-anchor="middle">4D</text>
+          <text x="398" y="440" text-anchor="middle">retained width K</text>
+          <text transform="translate(20 220) rotate(-90)" text-anchor="middle">final validation loss</text>
+        </g>
+        <line x1="92" y1="115" x2="704" y2="115" stroke="#24251f" stroke-width="1.7" stroke-dasharray="7 6"/>
+        <text x="697" y="106" text-anchor="end" fill="#24251f" font-family="system-ui, sans-serif" font-size="11">dense GELU · 4.000445</text>
+
+        <polyline points="145,83 315,166 485,112 655,73" fill="none" stroke="#a24d31" stroke-width="3"/>
+        <polyline points="145,191 315,279 485,285 655,144" fill="none" stroke="#356d92" stroke-width="3"/>
+        <polyline points="145,190 315,346 485,322 655,294" fill="none" stroke="#276b55" stroke-width="3.5"/>
+        <g fill="#fffdf8" stroke-width="3">
+          <g stroke="#a24d31"><circle cx="145" cy="83" r="5"/><circle cx="315" cy="166" r="5"/><circle cx="485" cy="112" r="5"/><circle cx="655" cy="73" r="5"/></g>
+          <g stroke="#356d92"><circle cx="145" cy="191" r="5"/><circle cx="315" cy="279" r="5"/><circle cx="485" cy="285" r="5"/><circle cx="655" cy="144" r="5"/></g>
+          <g stroke="#276b55"><circle cx="145" cy="190" r="5"/><circle cx="315" cy="346" r="7"/><circle cx="485" cy="322" r="5"/><circle cx="655" cy="294" r="5"/></g>
+        </g>
+        <path d="M315 338 L350 313" stroke="#276b55" stroke-width="1.5"/>
+        <rect x="346" y="286" width="122" height="31" rx="6" fill="#e4efe8"/>
+        <text x="357" y="306" fill="#1d4638" font-family="system-ui, sans-serif" font-size="12" font-weight="700">best · 3.910170</text>
+      </svg>
+      <div class="legend">
+        <span class="key" style="color:#a24d31"><i class="swatch"></i>H=4D</span>
+        <span class="key" style="color:#356d92"><i class="swatch"></i>H=8D</span>
+        <span class="key" style="color:#276b55"><i class="swatch"></i>H=16D</span>
+        <span class="key" style="color:#24251f"><i class="swatch"></i>dense GELU</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The compute contract</p>
+    <h2>Score every feature; backpropagate only through the selected path</h2>
+    <div class="grid-two">
+      <div class="panel">
+        <h3>Forward</h3>
+        <p>Exact TopK first computes all <code>H</code> feature scores. Only the selected <code>K</code> decoder rows are contracted into the block output.</p>
+        <div class="formula">score:   x W_up       = 2 D H
+decode:  a W_down[i] = 2 K D
+──────────────────────────
+forward total        = 2 D H + 2 K D</div>
+      </div>
+      <div class="panel">
+        <h3>Backward</h3>
+        <p>There are four active-width contractions: decoder-row gradient, retained-value gradient, selected encoder-column gradient, and the encoder contribution to <code>dX</code>.</p>
+        <div class="formula">dW_down  = 2 K D
+da       = 2 K D
+dW_up    = 2 K D
+dX       = 2 K D
+──────────────────
+backward = 8 K D</div>
+      </div>
+    </div>
+    <div class="callout"><strong>Training MLP cost: <span class="mono">2DH + 10KD</span>.</strong> The ordinary 4× dense MLP costs <span class="mono">48D²</span>: <span class="mono">16D²</span> forward plus <span class="mono">32D²</span> backward. This makes <span class="mono">H=4D,K=4D</span> the equal-cost dense-ReLU control.</div>
+    <div class="prose">
+      <p>The rest of the transformer is traced normally. At the sparse-MLP boundary, the physical gathered program is assigned the declared contraction cost above. TopK sorting, gathers, scatters, padding, memory traffic, bias and activation elementwise operations, and dense AdamW moment updates are outside this matrix-FLOP contract.</p>
+      <p>This accounting is intentionally honest about the encoder: exact TopK cannot skip <code>xW_up</code> columns without a separate approximate router. What it idealizes is the selected decoder and backward path. That is the right abstraction for asking whether the algorithm deserves a better kernel, but not for claiming current-device speed.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Building the ladder</p>
+    <h2>Depth is the integer lever; steps close the remainder</h2>
+    <div class="prose">
+      <p>For fixed width, context, and sparse coordinate, full-model FLOPs per token are affine in layer count. Two short traces identify the non-layer cost <code>A</code> and per-layer cost <code>B</code>; the real-valued depth that matches dense is rounded to the nearest layer. The remaining mismatch is corrected with whole optimizer steps.</p>
+    </div>
+    <div class="formula">F(L; H,K) = A + B(H,K)L
+B = F(2) − F(1)                 A = F(1) − B
+
+L* = (F_dense − A) / B          L = round(L*)
+
+C_dense = 2,286 × 131,072 × 737,673,984
+        = 221,029,692,528,918,528 FLOPs
+
+steps(H,K) = round(C_dense / (131,072 × F(L;H,K)))</div>
+
+    <div class="table-wrap">
+      <table aria-label="Layer and step choices across the sparse grid">
+        <thead><tr><th>H / D</th><th>K=4D</th><th>K=2D</th><th>K=D</th><th>K=D/4</th></tr></thead>
+        <tbody>
+          <tr><td>4</td><td>12 L / 2,286 S</td><td>13 / 2,255</td><td>13 / 2,315</td><td>14 / 2,228</td></tr>
+          <tr><td>8</td><td>12 / 2,243</td><td>12 / 2,354</td><td>13 / 2,267</td><td>13 / 2,312</td></tr>
+          <tr><td>16</td><td>11 / 2,316</td><td>12 / 2,264</td><td>12 / 2,319</td><td>13 / 2,218</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">Cells are transformer layers / optimizer steps. Lower retained width can fund another block; larger stored width still raises cost because all feature scores are computed.</p>
+
+    <div class="prose" style="margin-top:28px">
+      <p>The adjustment is full-model rather than MLP-only. Attention and vocabulary costs remain in every trace, so “halve active MLP width, double depth” would generally be wrong. Integer depth also changes stored parameters. These runs span 59.92M–107.76M parameters and 2.6979–5.0007 tokens per stored parameter even though total training FLOPs are fixed.</p>
+      <p>Accordingly, the arms are explicit-step cosine schedules, not fixed-TPP experiments. The recipe reanchors duration-dependent multipliers at <code>m_D=1</code>; it does not pretend that their intentionally different token horizons form a Complete(d)P duration ladder.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">All endpoints</p>
+    <h2>The 3 × 4 sparse grid</h2>
+    <div class="table-wrap">
+      <table aria-label="Exact endpoint results">
+        <thead><tr><th>H/D · K/D</th><th>layers</th><th>steps</th><th>params</th><th>PFLOPs</th><th>val loss</th><th>Δ dense</th><th>tokens/s</th></tr></thead>
+        <tbody>
+          <tr><td>dense GELU · 4</td><td>12</td><td>2,286</td><td>59.92M</td><td>221.0297</td><td>4.000445</td><td>—</td><td>1,413,180</td></tr>
+          <tr class="control"><td>4 · 4 (ReLU control)</td><td>12</td><td>2,286</td><td>59.92M</td><td>221.0297</td><td>4.016951</td><td>+0.016506</td><td>1,407,447</td></tr>
+          <tr><td>4 · 2</td><td>13</td><td>2,255</td><td>61.69M</td><td>220.9960</td><td>4.001746</td><td>+0.001301</td><td>51,636</td></tr>
+          <tr><td>4 · 1</td><td>13</td><td>2,315</td><td>61.69M</td><td>221.0596</td><td>3.980644</td><td>−0.019801</td><td>97,234</td></tr>
+          <tr><td>4 · 1/4</td><td>14</td><td>2,228</td><td>63.47M</td><td>221.0628</td><td>4.012985</td><td>+0.012540</td><td>268,153</td></tr>
+          <tr><td>8 · 4</td><td>12</td><td>2,243</td><td>74.09M</td><td>221.0338</td><td>3.988944</td><td>−0.011501</td><td>26,652</td></tr>
+          <tr><td>8 · 2</td><td>12</td><td>2,354</td><td>74.09M</td><td>221.0530</td><td>3.934042</td><td>−0.066403</td><td>50,756</td></tr>
+          <tr><td>8 · 1</td><td>13</td><td>2,267</td><td>77.05M</td><td>221.0328</td><td>3.936318</td><td>−0.064127</td><td>85,251</td></tr>
+          <tr><td>8 · 1/4</td><td>13</td><td>2,312</td><td>77.05M</td><td>221.0636</td><td>3.970798</td><td>−0.029647</td><td>221,294</td></tr>
+          <tr><td>16 · 4</td><td>11</td><td>2,316</td><td>97.12M</td><td>221.0656</td><td>3.930358</td><td>−0.070087</td><td>24,682</td></tr>
+          <tr><td>16 · 2</td><td>12</td><td>2,264</td><td>102.44M</td><td>221.0029</td><td>3.919614</td><td>−0.080831</td><td>42,808</td></tr>
+          <tr class="best"><td>16 · 1</td><td>12</td><td>2,319</td><td>102.44M</td><td>220.9934</td><td>3.910170</td><td>−0.090275</td><td>73,631</td></tr>
+          <tr><td>16 · 1/4</td><td>13</td><td>2,218</td><td>107.76M</td><td>220.9923</td><td>3.971284</td><td>−0.029161</td><td>147,039</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Interpretation</p>
+    <h2>Promising algorithm, unresolved system</h2>
+    <div class="grid-two">
+      <div class="panel">
+        <h3>What the study says</h3>
+        <p>Stored feature capacity can be useful without activating all of it. The broad gains around <code>H=16D</code> and <code>K=D–2D</code> justify testing the idea at larger widths once a viable primitive exists. A local 101-step trajectory check at 25%, 50%, and 75% of the common budget also favors <code>H=16D,K=D</code>; the endpoint is not a final-step fluctuation.</p>
+      </div>
+      <div class="panel">
+        <h3>What it does not say</h3>
+        <p>One seed cannot resolve the 0.0094-nat gap between the best two cells or estimate a stable effect. LR was not retuned per geometry, and varying depth changes representation composition. Larger-model transfer remains entirely untested.</p>
+      </div>
+    </div>
+    <div class="caveat" style="margin-top:32px">
+      <p><strong>The current TPU kernel is not scalable.</strong> The gathered sparse treatments run roughly 5–57× slower than the dense anchor across this grid; the best-quality cell is about 19× slower. Exact selection and indirect row updates are dominated by gathers, memory traffic, padding, and launch/latency costs that the contraction formula intentionally does not charge. A tested Pallas TensorCore decoder was slower still because this v4 path has no efficient indirect sparse-row DMA.</p>
+      <p>That is a systems limitation, not a reason to rewrite the endpoint as negative. The appropriate conclusion is conditional: the algorithm buys quality at a fixed ideal sparse-contraction budget, so its value now depends on finding an accelerator mapping that approaches that budget.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Reproducibility</p>
+    <h2>Exact data and source identity are preserved</h2>
+    <div class="prose">
+      <p>All 13 runs completed successfully and pass <code>rig verify</code>. They are clean at Git commit <code>ad11241342321aee8984e3aa362ffd7b32278993</code>, use the FineWeb-8B GPT-2 manifest with canonical SHA256 <code>34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804</code>, and evaluate the same held-out <code>fineweb_val_000000.bin</code> split over 1,048,576 tokens. Every arm ran on 16 TPU v4 chips across four processes, with 8,192 context, global batch 16, LR 2<sup>−8</sup>, and seed 1350.</p>
+      <p>The <a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M">Hugging Face study package</a> contains raw training and diagnostic <code>.riglog</code> files, exact validation rows, resolved records and provenance, plus compact and full-resolution study-browser payloads. The <a href="https://github.com/honglu2875/rig/blob/research/sparse-autoencoder/recipes/sparse_autoencoder/README.md">recipe documentation</a> describes the implementation and kernel tests.</p>
+    </div>
+  </section>
+
+  <footer class="footer">
+    Sealed as an algorithmic mechanism study. Exact values come from the archived final validation records; throughput is reported only to expose the present systems gap, never as the equal-compute coordinate.
+  </footer>
+</main>
+</body>
+</html>
