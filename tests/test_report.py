@@ -763,6 +763,50 @@ class StudyExportTests(unittest.TestCase):
             folders, ["60m-5tpp-bs1-lr2e-8-s1337", "60m-moe-5tpp-bs1-lr2e-8-s1337"]
         )
 
+    def test_sparse_dictionary_coordinates_are_archive_coordinates(self) -> None:
+        """Stored width, active width, and depth name an equi-FLOP cell."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            models = (
+                {
+                    "d_model": 16,
+                    "layers": 12,
+                    "mlp_activation": "topk_relu",
+                    "mlp_mult": 4,
+                    "mlp_top_k": 64,
+                },
+                {
+                    "d_model": 16,
+                    "layers": 13,
+                    "mlp_activation": "topk_relu",
+                    "mlp_mult": 16,
+                    "mlp_top_k": 4,
+                },
+            )
+            for run, model in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                models,
+                strict=True,
+            ):
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
+                payload["seed"] = 1350
+                payload["contract"]["model"] = model
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(summary["runs"], 2)
+        self.assertEqual(
+            folders,
+            [
+                "60m-sparse-h16d-k0p25d-l13-5tpp-bs1-lr2e-8-s1350",
+                "60m-sparse-h4d-k4d-l12-5tpp-bs1-lr2e-8-s1350",
+            ],
+        )
+
     def test_a_duration_run_does_not_overwrite_the_reference_run_beside_it(
         self,
     ) -> None:

@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 414 runs across seventeen studies, laid out as `<study>/<run-name>/`, at full
+— 427 runs across eighteen studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -52,6 +52,7 @@ by-product:
 | expert-load-scaling | exact endpoints | — | 0.02 MB |
 | moe-weight-decay | exact endpoints | — | 0.04 MB |
 | gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.04 MB |
+| sparse-autoencoder-eqflop | exact endpoints + compute derivation | — | 0.02 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -99,6 +100,13 @@ last-200-step permutation-invariant router summaries, and the first identical
 update diagnostic. The 38 KiB page is static inline SVG with no runtime
 JavaScript or fetch. The study browser adds mean-across-block timelines for the
 four local-objective metrics; raw logs preserve every block separately.
+
+`sparse-autoencoder-eqflop.html` is a static algorithmic study over one dense
+anchor and twelve sparse TopK-ReLU treatments. It reports exact endpoints and
+the declared forward/backward contraction budget, then shows how depth and
+whole optimizer steps make the full-model grid equal-FLOP. The 22 KiB page uses
+inline SVG and no runtime JavaScript or fetch. Throughput is included only to
+make the current kernel limitation explicit.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -167,6 +175,11 @@ Every decay cell uses seeds 1337–1339 on that same topology.
 The Gumbel-local MoE study also uses TPU v4 at 4 processes and 16 chips for all
 eight arms. Its K=0/K=2 comparison is paired within that topology.
 
+The sparse-autoencoder study uses TPU v4 at 4 processes and 16 chips for all
+13 arms. Hardware is fixed, but wall time is not the comparison coordinate:
+the selected-row implementation is memory/latency bound and much slower than
+the equal-algorithmic-FLOP dense anchor.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -185,6 +198,7 @@ eight arms. Its K=0/K=2 comparison is paired within that topology.
 | [expert-load-scaling](expert-load-scaling.html) | 5 | 125M | per-expert gradient/update scaling by current load | [`moe-expert-load-scaling-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-expert-load-scaling-125M) |
 | [moe-weight-decay](moe-weight-decay.html) | 36 | 60M/125M | base AdamW weight decay × seed | [`moe-weight-decay`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-weight-decay) |
 | [gumbel-local-moe](gumbel-local-moe.html) | 8 | 125M | Gumbel-routed local MoE steps × seed | [`moe-gumbel-local-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M) |
+| [sparse-autoencoder-eqflop](sparse-autoencoder-eqflop.html) | 13 | 60M geometry | dictionary width × retained width at equal algorithmic FLOPs | [`sparse-autoencoder-eqflop-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -643,6 +657,55 @@ do
     --checkpoint-policy none --name "125m-k${k}-s${seed}" -- \
     --local-moe-steps "$k"
 done
+```
+
+## sparse-autoencoder-eqflop.html
+
+Thirteen verified seed-1350 runs compare the 60M dense GELU reference with a
+3 × 4 grid of overcomplete TopK-ReLU MLPs at 8k context. Stored dictionary
+width is `H/D ∈ {4,8,16}` and retained width is
+`K/D ∈ {4,2,1,1/4}`. Every point targets the same 221.03-PFLOP full-model
+algorithmic training budget.
+
+The sparse MLP charges `2DH` for scoring all dictionary features, `2KD` for
+the selected decoder, and `8KD` for its four active-width backward
+contractions, for a training total of `2DH + 10KD` per token and layer. The
+ordinary 4× dense MLP costs `48D²`. Costs outside this contraction contract—
+selection, gathers/scatters, padding, memory traffic, and dense AdamW
+state—remain real but do not define the algorithmic comparison.
+
+For each `(H,K)`, one- and two-layer traces identify the affine full-model
+relation `F(L)=A+BL`. We choose the nearest integer layer count to the dense
+per-token cost, then choose whole schedule steps as
+`round(C_dense / (batch × sequence × F(L)))`. Layers range from 11 to 14 and
+steps from 2,218 to 2,354; the largest total-compute mismatch is below 0.02%.
+Parameter count and TPP vary intentionally, so these are explicit-step
+equal-FLOP runs rather than a fixed-TPP duration ladder.
+
+The static [findings report](sparse-autoencoder-eqflop.html) shows the full
+derivation and exact grid. `H=16D,K=D,L=12` is best at 3.910170 validation
+loss, 0.090275 nats below the 4.000445 dense anchor. Moderate activity is
+consistently strongest at `H=16D`; `K=D/4` gives much of the gain back. The
+`H=4D,K=4D` dense-ReLU control is 0.016506 nats worse than GELU, so activation
+choice alone does not explain the result.
+
+This is a one-seed algorithmic result, not a practical kernel result. The
+gathered implementation is roughly 5–57× slower than dense across the grid,
+and a Pallas TensorCore prototype was slower still on v4. The study motivates
+a better sparse primitive and larger-model replication; it does not claim
+current wall-clock efficiency.
+
+The runs are clean at commit
+`ad11241342321aee8984e3aa362ffd7b32278993`. A representative winning cell is:
+
+```bash
+git checkout ad11241342321aee8984e3aa362ffd7b32278993
+uv run --frozen --no-sync rig run sparse_autoencoder \
+  --cluster v4-32 --profile dev --tier 60m --context 8k \
+  --batch-size 16 --base-learning-rate 0.00390625 --seed 1350 \
+  --checkpoint-policy none --name 60m-eqflop-h16d-k1d-l12-s1350 -- \
+  --sparse-layers 12 --sparse-mlp-mult 16 --sparse-top-k 384 \
+  --sparse-training-steps 2319 --sparse-mlp-backend reference
 ```
 
 ## transfer-charts.html

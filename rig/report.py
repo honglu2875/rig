@@ -1699,6 +1699,28 @@ def _study_run_name(
     # name so one run cannot be exported on top of another.
     routed = "-moe" if (metrics.get("experts") or 0) else ""
     model = (result.get("contract") or {}).get("model") or {}
+    sparse_mlp = ""
+    if model.get("mlp_activation") == "topk_relu":
+        hidden_ratio = model.get("mlp_mult")
+        top_k = model.get("mlp_top_k")
+        model_width = model.get("d_model")
+        layers = model.get("layers")
+        coordinates = (hidden_ratio, top_k, model_width, layers)
+        if any(isinstance(value, bool) for value in coordinates) or not (
+            isinstance(hidden_ratio, (int, float))
+            and isinstance(top_k, int)
+            and isinstance(model_width, int)
+            and isinstance(layers, int)
+            and math.isfinite(hidden_ratio)
+            and hidden_ratio > 0
+            and top_k > 0
+            and model_width > 0
+            and layers > 0
+        ):
+            return ""
+        compact_hidden = format(hidden_ratio, ".12g").replace(".", "p")
+        compact_active = format(top_k / model_width, ".12g").replace(".", "p")
+        sparse_mlp = f"-sparse-h{compact_hidden}d-k{compact_active}d-l{layers}"
     duration = (
         "-duration"
         if model.get("parameterization") == "completedp_duration_v1"
@@ -1744,7 +1766,7 @@ def _study_run_name(
             return ""
         local_moe = f"-local-k{local_steps}"
     return (
-        f"{tier}{routed}{duration}{local_moe}{load_scaling}{decay}"
+        f"{tier}{routed}{sparse_mlp}{duration}{local_moe}{load_scaling}{decay}"
         f"-{tpp}tpp-bs{batch}-lr2e{exponent}"
         f"-s{result.get('seed')}"
     )
