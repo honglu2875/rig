@@ -23,12 +23,13 @@ import jax.numpy as jnp
 from jax.sharding import Mesh, PartitionSpec as P
 
 
-Backend = Literal["auto", "pallas", "reference"]
+Backend = Literal["auto", "pallas", "pallas_masked", "reference"]
 SparseMlpCallable = Callable[
     [jax.Array, jax.Array, jax.Array, jax.Array, jax.Array], jax.Array
 ]
 TPU_VECTOR_LANES = 128
 TPU_BF16_SUBLANES = 8
+PALLAS_MASKED_MAX_BLOCK_ELEMENTS = 786_432
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +46,7 @@ class SparseMlpConfig:
     def __post_init__(self) -> None:
         if self.top_k <= 0:
             raise ValueError("top_k must be positive")
-        if self.backend not in ("auto", "pallas", "reference"):
+        if self.backend not in ("auto", "pallas", "pallas_masked", "reference"):
             raise ValueError(f"unknown sparse MLP backend: {self.backend!r}")
         if self.token_block <= 0:
             raise ValueError("token_block must be positive")
@@ -106,6 +107,152 @@ def topk_relu(preactivations: jax.Array, *, top_k: int) -> tuple[jax.Array, jax.
     return lax.top_k(jax.nn.relu(preactivations), top_k)
 
 
+def pallas_masked_token_block(hidden_width: int, preferred: int) -> int:
+    """Resolve the largest safe eight-row token block up to ``preferred``.
+
+    The bound keeps the double-buffered activation/result windows and packed
+    int32 keys within v4's 16 MiB VMEM. Larger dictionaries therefore shrink
+    the block automatically while small tiers retain more parallel work.
+    """
+
+    if hidden_width <= 0 or hidden_width > 65_536:
+        raise ValueError("pallas_masked hidden width must be in [1, 65,536]")
+    if preferred <= 0 or preferred % TPU_BF16_SUBLANES:
+        raise ValueError("preferred token block must be a positive multiple of 8")
+    maximum = (
+        PALLAS_MASKED_MAX_BLOCK_ELEMENTS // hidden_width // TPU_BF16_SUBLANES
+    ) * TPU_BF16_SUBLANES
+    if maximum < TPU_BF16_SUBLANES:
+        raise ValueError("hidden width leaves no viable pallas_masked token block")
+    return min(preferred, maximum)
+
+
+def pallas_masked_topk_relu(
+    activated: jax.Array,
+    *,
+    top_k: int,
+    token_block: int,
+    interpret: bool,
+    debug: bool,
+) -> jax.Array:
+    """Select exact BF16 TopK support and return a dense zero-masked array.
+
+    TPU v4 has no hardware path for a different element-sparse decoder matrix
+    on every token. Gathering decoder rows therefore moves orders of magnitude
+    more data than a dense MXU matmul. This kernel instead makes the expensive
+    part cheap: it finds the exact support in VMEM, emits the selected BF16
+    activations, and lets the following dense matmul reuse decoder weights.
+
+    Positive BF16 bit patterns preserve numerical order. Packing each value
+    with the reverse column index also reproduces ``lax.top_k``'s stable
+    lower-index tie break. Every packed key is unique, so a fixed-width binary
+    search finds the kth key without a sort, a large index result, or a prefix
+    scan. The decoder still performs dense hardware FLOPs; callers and reports
+    must not mistake this systems optimization for an element-sparse MXU.
+    """
+
+    if activated.dtype != jnp.bfloat16:
+        raise ValueError("pallas_masked requires bfloat16 activations")
+    if activated.ndim < 2:
+        raise ValueError("activated must have at least two dimensions")
+    hidden_width = activated.shape[-1]
+    if top_k <= 0 or top_k > hidden_width:
+        raise ValueError("top_k must be positive and no larger than hidden width")
+    if hidden_width > 65_536:
+        raise ValueError("pallas_masked supports hidden widths up to 65,536")
+    if hidden_width % TPU_VECTOR_LANES:
+        raise ValueError("pallas_masked hidden width must be a multiple of 128")
+    token_block = pallas_masked_token_block(hidden_width, token_block)
+
+    prefix = activated.shape[:-1]
+    tokens = math.prod(prefix)
+    padded_tokens = math.ceil(tokens / token_block) * token_block
+    flat = activated.reshape((tokens, hidden_width))
+    if padded_tokens != tokens:
+        flat = jnp.pad(flat, ((0, padded_tokens - tokens), (0, 0)))
+    index_bits = max(1, (hidden_width - 1).bit_length())
+    search_iterations = 15 + index_bits
+    maximum_key = (0x7FFF << index_bits) | (hidden_width - 1)
+
+    def kernel(activated_ref, selected_ref):
+        values = activated_ref[...]
+        bits = lax.bitcast_convert_type(values, jnp.uint16).astype(jnp.int32)
+        columns = lax.broadcasted_iota(jnp.int32, bits.shape, 1)
+        keys = (bits << index_bits) | (hidden_width - 1 - columns)
+        lower = jnp.zeros((token_block, 1), jnp.int32)
+        upper = jnp.full((token_block, 1), maximum_key, jnp.int32)
+
+        def bisect(_iteration, bounds):
+            low, high = bounds
+            distance = high - low
+            middle = low + distance // 2 + distance % 2
+            count = jnp.sum(
+                keys >= middle, axis=1, keepdims=True, dtype=jnp.int32
+            )
+            keep_upper_half = count >= top_k
+            return jnp.where(keep_upper_half, middle, low), jnp.where(
+                keep_upper_half, high, middle - 1
+            )
+
+        threshold, _ = lax.fori_loop(
+            0, search_iterations, bisect, (lower, upper)
+        )
+        # ReLU-selected zeros have zero value and zero derivative, so omitting
+        # their nominal support preserves the complete differentiable result.
+        selected_ref[...] = jnp.where((keys >= threshold) & (bits > 0), values, 0)
+
+    with jax.named_scope("exact_bf16_topk_select"):
+        selected = pl.pallas_call(
+            kernel,
+            out_shape=jax.ShapeDtypeStruct(flat.shape, flat.dtype),
+            grid=(padded_tokens // token_block,),
+            in_specs=(
+                pl.BlockSpec(
+                    (token_block, hidden_width), lambda program: (program, 0)
+                ),
+            ),
+            out_specs=pl.BlockSpec(
+                (token_block, hidden_width), lambda program: (program, 0)
+            ),
+            interpret=interpret,
+            debug=debug,
+            compiler_params=pltpu.CompilerParams(
+                dimension_semantics=("parallel",)
+            ),
+            name="exact_bf16_topk_select",
+        )(flat)
+    return selected[:tokens].reshape((*prefix, hidden_width))
+
+
+@functools.cache
+def _make_pallas_masked_topk_relu(config: SparseMlpConfig):
+    @jax.custom_vjp
+    def operation(activated: jax.Array) -> jax.Array:
+        return pallas_masked_topk_relu(
+            activated,
+            top_k=config.top_k,
+            token_block=config.token_block,
+            interpret=config.interpret,
+            debug=config.debug,
+        )
+
+    def forward(activated):
+        selected = pallas_masked_topk_relu(
+            activated,
+            top_k=config.top_k,
+            token_block=config.token_block,
+            interpret=config.interpret,
+            debug=config.debug,
+        )
+        return selected, selected > 0
+
+    def backward(mask, cotangent):
+        return (jnp.where(mask, cotangent, 0),)
+
+    operation.defvjp(forward, backward)
+    return operation
+
+
 def reference_sparse_decode(
     values: jax.Array,
     indices: jax.Array,
@@ -135,10 +282,8 @@ def naive_dense_topk_mlp(
 ) -> jax.Array:
     """Literal dense -> TopK-ReLU -> dense oracle for fuzzy kernel tests."""
 
-    hidden = jnp.einsum(
-        "...d,dh->...h", x, up_weight, preferred_element_type=jnp.float32
-    )
-    hidden = hidden + up_bias
+    hidden = jnp.einsum("...d,dh->...h", x, up_weight.astype(x.dtype))
+    hidden = hidden + up_bias.astype(x.dtype)
     values, indices = topk_relu(hidden, top_k=top_k)
     sparse_hidden = jnp.zeros_like(hidden)
     sparse_hidden = jnp.put_along_axis(
@@ -147,10 +292,10 @@ def naive_dense_topk_mlp(
     output = jnp.einsum(
         "...h,hd->...d",
         sparse_hidden,
-        down_weight,
+        down_weight.astype(x.dtype),
         preferred_element_type=jnp.float32,
     )
-    return (output + down_bias).astype(x.dtype)
+    return (output + down_bias.astype(x.dtype)).astype(x.dtype)
 
 
 def _sparse_decode_kernel(
@@ -511,6 +656,35 @@ def _dense_relu_mlp(
     return (output + down_bias.astype(x.dtype)).astype(x.dtype)
 
 
+@functools.partial(jax.jit, static_argnames=("config",))
+def _pallas_masked_dense_mlp(
+    x: jax.Array,
+    up_weight: jax.Array,
+    up_bias: jax.Array,
+    down_weight: jax.Array,
+    down_bias: jax.Array,
+    *,
+    config: SparseMlpConfig,
+) -> jax.Array:
+    """Exact TopK-ReLU with Pallas selection and a dense TPU decoder.
+
+    The output and VJP are those of dense -> TopK-ReLU -> dense. The zeroed
+    decoder matmul deliberately uses MXU hardware rather than attempting an
+    element-sparse gather that v4 cannot execute efficiently.
+    """
+
+    hidden = jnp.einsum("...d,dh->...h", x, up_weight.astype(x.dtype))
+    activated = jax.nn.relu(hidden + up_bias.astype(x.dtype))
+    selected = _make_pallas_masked_topk_relu(config)(activated)
+    output = jnp.einsum(
+        "...h,hd->...d",
+        selected,
+        down_weight.astype(x.dtype),
+        preferred_element_type=jnp.float32,
+    )
+    return (output + down_bias.astype(x.dtype)).astype(x.dtype)
+
+
 def sparse_topk_mlp(
     x: jax.Array,
     up_weight: jax.Array,
@@ -535,6 +709,15 @@ def sparse_topk_mlp(
             up_bias,
             down_weight,
             down_bias,
+        )
+    if config.backend == "pallas_masked":
+        return _pallas_masked_dense_mlp(
+            x,
+            up_weight,
+            up_bias,
+            down_weight,
+            down_bias,
+            config=config,
         )
     return _selected_sparse_topk_mlp(
         x,
@@ -582,6 +765,8 @@ __all__ = (
     "SparseMlpConfig",
     "make_mesh_sparse_topk_mlp",
     "naive_dense_topk_mlp",
+    "pallas_masked_topk_relu",
+    "pallas_masked_token_block",
     "pallas_sparse_decode",
     "reference_sparse_decode",
     "sparse_topk_mlp",

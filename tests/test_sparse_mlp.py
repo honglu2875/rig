@@ -17,6 +17,8 @@ from rig.kernels.sparse_mlp import (
     SparseMlpConfig,
     make_mesh_sparse_topk_mlp,
     naive_dense_topk_mlp,
+    pallas_masked_topk_relu,
+    pallas_masked_token_block,
     pallas_sparse_decode,
     reference_sparse_decode,
     sparse_topk_mlp,
@@ -65,6 +67,29 @@ class SparseMlpKernelTests(unittest.TestCase):
         )
         self.assertEqual(actual.shape, x.shape)
         np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
+
+    def test_pallas_masked_interpreter_selects_exact_stable_bf16_support(
+        self,
+    ) -> None:
+        activated = jax.random.uniform(
+            jax.random.key(18), (9, 256), jnp.bfloat16, minval=0, maxval=1
+        )
+        # Force boundary ties so the lower-column stable ordering is part of
+        # the numerical contract rather than an incidental random property.
+        activated = activated.at[:, 60:68].set(jnp.bfloat16(0.5))
+        values, indices = topk_relu(activated, top_k=64)
+        expected = jnp.zeros_like(activated)
+        expected = jnp.put_along_axis(
+            expected, indices, values, axis=-1, inplace=False
+        )
+        actual = pallas_masked_topk_relu(
+            activated,
+            top_k=64,
+            token_block=8,
+            interpret=True,
+            debug=False,
+        )
+        np.testing.assert_array_equal(actual, expected)
 
     def test_fused_forward_and_every_gradient_match_dense_topk_dense(
         self,
@@ -133,11 +158,57 @@ class SparseMlpKernelTests(unittest.TestCase):
                 atol=1e-6,
             )
 
+    def test_pallas_masked_full_vjp_matches_literal_dense_topk_dense(self) -> None:
+        bf16_inputs = self.inputs(dtype=jnp.bfloat16)
+        fp32_inputs = self.inputs(dtype=jnp.float32)
+        inputs = (bf16_inputs[0], *fp32_inputs[1:])
+        config = SparseMlpConfig(
+            top_k=8,
+            backend="pallas_masked",
+            token_block=8,
+            interpret=True,
+        )
+        cotangent = jax.random.normal(
+            jax.random.key(19), inputs[0].shape, jnp.bfloat16
+        )
+
+        def actual_loss(*operands):
+            return jnp.sum(
+                sparse_topk_mlp(*operands, config=config).astype(jnp.float32)
+                * cotangent.astype(jnp.float32)
+            )
+
+        def expected_loss(*operands):
+            return jnp.sum(
+                naive_dense_topk_mlp(*operands, top_k=8).astype(jnp.float32)
+                * cotangent.astype(jnp.float32)
+            )
+
+        np.testing.assert_allclose(
+            sparse_topk_mlp(*inputs, config=config),
+            naive_dense_topk_mlp(*inputs, top_k=8),
+            rtol=1e-2,
+            atol=2e-3,
+        )
+        for actual_gradient, expected_gradient in zip(
+            jax.grad(actual_loss, argnums=(0, 1, 2, 3, 4))(*inputs),
+            jax.grad(expected_loss, argnums=(0, 1, 2, 3, 4))(*inputs),
+            strict=True,
+        ):
+            np.testing.assert_allclose(
+                actual_gradient,
+                expected_gradient,
+                rtol=2e-2,
+                atol=5e-3,
+            )
+
     def test_configuration_rejects_invalid_static_kernel_contracts(self) -> None:
         with self.assertRaisesRegex(ValueError, "top_k must be positive"):
             SparseMlpConfig(top_k=0)
         with self.assertRaisesRegex(ValueError, "multiple of 128"):
             SparseMlpConfig(top_k=1, output_block=64)
+        self.assertEqual(pallas_masked_token_block(6_144, 128), 128)
+        self.assertEqual(pallas_masked_token_block(28_672, 128), 24)
 
     def test_explicit_mesh_boundary_is_trainable(self) -> None:
         x, *parameters = self.inputs()

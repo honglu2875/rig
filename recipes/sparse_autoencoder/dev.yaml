@@ -93,9 +93,10 @@ run:
     dtype: bfloat16
   kernels:
     attention_backend: tpu_flash
-    sparse_mlp_backend: reference
-    # Bounds the Pallas prototype's SMEM-prefetched assignment metadata.
-    sparse_mlp_token_block: 8
+    # Exact BF16 TopK selection in Pallas; the zero-masked decoder uses MXUs.
+    sparse_mlp_backend: pallas_masked
+    # Preferred maximum; larger dictionaries resolve a smaller v4-safe block.
+    sparse_mlp_token_block: 128
     sparse_mlp_output_block: 128
     loss_backend: tiled
     vocab_tile_size: 2048

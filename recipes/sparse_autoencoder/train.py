@@ -159,6 +159,7 @@ from rig.kernels import (
     SparseMlpConfig,
     make_causal_attention,
     make_mesh_sparse_topk_mlp,
+    pallas_masked_token_block,
     select_attention_tiles,
     sparse_topk_mlp,
     tiled_tied_cross_entropy,
@@ -453,7 +454,7 @@ class TrainingSettings:
 @dataclass(frozen=True, slots=True)
 class KernelSettings:
     attention_backend: Literal["dense", "jax_flash", "tpu_flash"]
-    sparse_mlp_backend: Literal["pallas", "reference"]
+    sparse_mlp_backend: Literal["pallas", "pallas_masked", "reference"]
     sparse_mlp_token_block: PositiveInt
     sparse_mlp_output_block: PositiveInt
     loss_backend: Literal["dense", "tiled"]
@@ -568,6 +569,29 @@ class ExperimentConfig(ConfigSchema):
                     raise ValueError(
                         f"{label} sparse token block prefetches too many TopK "
                         f"assignments for TPU SMEM ({assignments:,} > 65,536)"
+                    )
+        if sparse_kernels.sparse_mlp_backend == "pallas_masked":
+            if run.training.dtype != "bfloat16":
+                raise ValueError(
+                    f"{label} run.kernels.sparse_mlp_backend pallas_masked "
+                    "requires training.dtype bfloat16"
+                )
+            if sparse_kernels.sparse_mlp_token_block % 8:
+                raise ValueError(
+                    f"{label} run.kernels.sparse_mlp_token_block must be a "
+                    "multiple of 8 for pallas_masked"
+                )
+            for tier_name, tier in family.tiers.items():
+                hidden = tier.model.mlp_mult * tier.model.d_model
+                if hidden % 128:
+                    raise ValueError(
+                        f"{label} family.tiers.{tier_name} hidden width must be "
+                        "a multiple of 128 for pallas_masked"
+                    )
+                if hidden > 65_536:
+                    raise ValueError(
+                        f"{label} family.tiers.{tier_name} hidden width exceeds "
+                        "the pallas_masked limit of 65,536"
                     )
         probe = run.evaluation.probe
         if probe is not None and probe.predictions > run.evaluation.final_predictions:
@@ -721,7 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sparse.add_argument(
         "--sparse-mlp-backend",
-        choices=("pallas", "reference"),
+        choices=("pallas", "pallas_masked", "reference"),
         default=None,
         help="implementation override for exact TPU kernel comparisons",
     )
@@ -907,6 +931,12 @@ def resolve_config(
     compute_dtype = jnp.bfloat16 if dtype_name == "bfloat16" else jnp.float32
     attention_backend = kernels.attention_backend
     sparse_mlp_backend = args.sparse_mlp_backend or kernels.sparse_mlp_backend
+    sparse_mlp_token_block = kernels.sparse_mlp_token_block
+    if sparse_mlp_backend == "pallas_masked":
+        sparse_mlp_token_block = pallas_masked_token_block(
+            mlp_mult * model.d_model,
+            sparse_mlp_token_block,
+        )
     sparse_mlp_output_block = (
         args.sparse_mlp_output_block or kernels.sparse_mlp_output_block
     )
@@ -941,6 +971,24 @@ def resolve_config(
             "sparse_mlp_token_block * sparse_top_k must not exceed 65,536 "
             "SMEM-prefetched assignments"
         )
+    if sparse_mlp_backend == "pallas_masked":
+        hidden = mlp_mult * model.d_model
+        if platform != "tpu":
+            raise ValueError(
+                f"{config_filename} sparse_mlp_backend pallas_masked requires "
+                "a TPU runtime"
+            )
+        if compute_dtype != jnp.bfloat16:
+            raise ValueError("sparse_mlp_backend pallas_masked requires bfloat16")
+        if sparse_mlp_token_block % 8:
+            raise ValueError(
+                "sparse_mlp_token_block must be a multiple of 8 for pallas_masked"
+            )
+        if hidden % 128 or hidden > 65_536:
+            raise ValueError(
+                "pallas_masked hidden width must be a multiple of 128 and no "
+                "larger than 65,536"
+            )
 
     batch_multiplier = batch_size / float(batch_anchor)
     # This project reanchors every TPP ladder. The multiplier captures only the
@@ -1013,7 +1061,7 @@ def resolve_config(
         semantic_vocab_size=model.semantic_vocab_size,
         attention_backend=attention_backend,
         sparse_mlp_backend=sparse_mlp_backend,
-        sparse_mlp_token_block=kernels.sparse_mlp_token_block,
+        sparse_mlp_token_block=sparse_mlp_token_block,
         sparse_mlp_output_block=sparse_mlp_output_block,
         loss_backend=kernels.loss_backend,
         vocab_tile_size=kernels.vocab_tile_size,
@@ -1085,6 +1133,16 @@ def contract_model_metadata(config: Config) -> dict[str, Any]:
     }
 
 
+def sparse_mlp_decoder_execution(config: Config) -> str:
+    """Describe hardware decoder work independently of sparse semantics."""
+
+    if config.mlp_top_k == config.mlp_mult * config.d_model:
+        return "dense_full_support"
+    if config.sparse_mlp_backend == "pallas_masked":
+        return "dense_zero_masked_mxu"
+    return "selected_rows"
+
+
 def model_console_rows(
     config: Config, total_parameters: int
 ) -> tuple[tuple[str, object], ...]:
@@ -1124,6 +1182,7 @@ def experiment_config_metadata(config: Config) -> dict[str, Any]:
             "kernels": {
                 "attention_backend": config.attention_backend,
                 "sparse_mlp_backend": config.sparse_mlp_backend,
+                "sparse_mlp_decoder_execution": sparse_mlp_decoder_execution(config),
                 "sparse_mlp_token_block": config.sparse_mlp_token_block,
                 "sparse_mlp_output_block": config.sparse_mlp_output_block,
                 "loss_backend": config.loss_backend,
@@ -1236,6 +1295,7 @@ def checkpoint_metadata(
             "dtype": config.dtype_name,
             "attention_backend": config.attention_backend,
             "sparse_mlp_backend": config.sparse_mlp_backend,
+            "sparse_mlp_decoder_execution": sparse_mlp_decoder_execution(config),
             "sparse_mlp_token_block": config.sparse_mlp_token_block,
             "sparse_mlp_output_block": config.sparse_mlp_output_block,
             "attention_tuning": attention_runtime_metadata(attention_runtime),
@@ -1256,6 +1316,7 @@ def implementation_metadata(
     return {
         "attention_backend": config.attention_backend,
         "sparse_mlp_backend": config.sparse_mlp_backend,
+        "sparse_mlp_decoder_execution": sparse_mlp_decoder_execution(config),
         "sparse_mlp_token_block": config.sparse_mlp_token_block,
         "sparse_mlp_output_block": config.sparse_mlp_output_block,
         "attention_tuning": attention_runtime_metadata(runtime),
@@ -1802,9 +1863,33 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
 
     tokens = jnp.zeros((1, config.seq_len), jnp.int32)
     targets = jnp.zeros((1, config.seq_len), jnp.int32)
+    flop_sparse_config = SparseMlpConfig(
+        top_k=config.mlp_top_k,
+        backend="reference",
+    )
+
+    def flop_sparse_mlp(x, up_weight, up_bias, down_weight, down_bias):
+        # Kernel choice must not change the scientific FLOP contract. In
+        # particular, pallas_masked deliberately executes a dense decoder on
+        # v4 while representing the same element-sparse algorithm. Trace the
+        # reference boundary so reports continue to bill selected work only.
+        return sparse_topk_mlp(
+            x,
+            up_weight,
+            up_bias,
+            down_weight,
+            down_bias,
+            config=flop_sparse_config,
+        )
 
     def loss(trainable: Mapping[str, Any]) -> jax.Array:
-        return cross_entropy(trainable, tokens, targets, config)
+        return cross_entropy(
+            trainable,
+            tokens,
+            targets,
+            config,
+            sparse_mlp_fn=flop_sparse_mlp,
+        )
 
     rules = default_rules().with_scope(
         "_selected_sparse_topk_mlp", sparse_topk_mlp_flop_rule
