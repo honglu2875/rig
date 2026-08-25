@@ -112,6 +112,15 @@ dense throughput, versus 1.75% for the former gathered implementation on the
 earlier v4-32 run. These timings are systems measurements, not loss results,
 and the dense versus gathered accumulation order is not bit-equal.
 
+Production-style parameter/optimizer donation measured 91.0 ms and 114.4 ms
+for the same pair, preserving 79.6% of dense throughput. The masked backend's
+hardware cost is effectively independent of `K`: at `K=128`, its full MLP
+value-plus-gradient benchmark remained 2.79 ms, while native gathered autodiff
+and the sparse custom VJP took 45.4 ms and 54.2 ms. Smaller-K/deeper ladders can
+therefore be equi-FLOP scientifically without being equi-time on v4. Treat
+`K`-dependent FLOP accounting as an algorithm contract, not a claim that this
+chip skips the corresponding decoder or gradient work.
+
 ## Tiled tied cross entropy
 
 [`rig.kernels.linear_cross_entropy`](../rig/kernels/linear_cross_entropy.py)

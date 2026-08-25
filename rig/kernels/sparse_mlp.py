@@ -1,11 +1,11 @@
 """Top-k sparse MLP used by the sparse-autoencoder recipe.
 
-The encoder must score every dictionary element in order to discover the exact
-top-k set.  The sparse part begins after that selection: the decoder gathers
-only the selected rows of ``down_weight`` and never constructs a dense hidden
-array full of zeros. The gathered-JAX implementation is the current v4 runtime
-path. The Pallas implementation is a numerical oracle-tested research
-prototype retained for hardware comparisons.
+The encoder scores every dictionary element to discover the exact top-k set.
+The reference and older Pallas backends then decode selected rows directly.
+On TPU v4 that token-dependent gather is much slower than an MXU matmul, so the
+production ``pallas_masked`` backend emits the exact dense zero mask and uses a
+dense hardware decoder. See ``docs/KERNELS.md`` for the semantic and physical
+FLOP distinction.
 """
 
 from __future__ import annotations
