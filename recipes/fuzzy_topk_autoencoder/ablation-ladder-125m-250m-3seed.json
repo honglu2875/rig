@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-ladder-125m-250m-3seed",
+  "extends_study": "fuzzy-topk-60m-3seed",
+  "objective": "Extend the paired three-seed 16D dictionary, fuzzy grouped K=4D comparison from 60M to the 125M and 250M dense model ladder.",
+  "hypothesis": "The fixed-group one-of-four approximation continues to match or improve on dense validation loss as model width and depth increase, at each tier's matched semantic matrix-FLOP endpoint.",
+  "common": {
+    "profile": "dev",
+    "context": "8k",
+    "document_masking": true,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "validation_predictions": 1048576,
+    "batch_size": 16,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "data_order": "paired by tier and seed",
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4
+  },
+  "budget": {
+    "basis": "At each tier, choose the integer fuzzy depth nearest the dense FLOPs-per-token anchor, then round the fuzzy schedule to the nearest whole step at the dense total algorithmic matrix-FLOP budget.",
+    "implementation_policy": "Do not shorten the learning horizon for the redundant regular contractions used by the choicewise backend; report their traced physical FLOPs separately.",
+    "tiers": {
+      "125m": {
+        "dense_total_flops": 846214831747891200,
+        "fuzzy_semantic_total_flops": 846289383488225280,
+        "relative_semantic_mismatch": 0.00008810025248563694,
+        "fuzzy_executed_total_flops": 1176245951036129280,
+        "executed_flops_relative_to_dense": 1.3900086679012058
+      },
+      "250m": {
+        "dense_total_flops": 3301450779407155200,
+        "fuzzy_semantic_total_flops": 3301575866940653568,
+        "relative_semantic_mismatch": 0.000037888656186729546,
+        "fuzzy_executed_total_flops": 4963669455340044288,
+        "executed_flops_relative_to_dense": 1.5034812835317737
+      }
+    }
+  },
+  "tiers": {
+    "125m": {
+      "dense": {
+        "recipe": "reference",
+        "layers": 12,
+        "d_model": 640,
+        "mlp": "4D GELU",
+        "parameters": 123456640,
+        "flops_per_token": 1371014400,
+        "schedule_steps": 4709,
+        "planned_tokens": 617218048,
+        "tokens_per_parameter": 4.999472268158278,
+        "reused_verified_runs": {
+          "1337": "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+          "1338": "20260825T194108.904905Z-reference-gmax-ladder-125m-dense-s1338-318eab6f",
+          "1339": "20260825T201107.229311Z-reference-gmax-ladder-125m-dense-s1339-32ad584a"
+        }
+      },
+      "fuzzy_h16d_k4d": {
+        "recipe": "fuzzy_topk_autoencoder",
+        "layers": 11,
+        "d_model": 640,
+        "dictionary_width": 10240,
+        "retained_width": 2560,
+        "group_size": 4,
+        "selector": "one ReLU winner from each fixed exchangeable feature group",
+        "decoder": "feature-specific row for every stored feature",
+        "backend": "choicewise",
+        "parameters": 226753280,
+        "semantic_flops_per_token": 1386743040,
+        "executed_flops_per_token": 1927415040,
+        "schedule_steps": 4656,
+        "planned_tokens": 610271232,
+        "tokens_per_parameter": 2.6913446720594294
+      }
+    },
+    "250m": {
+      "dense": {
+        "recipe": "reference",
+        "layers": 16,
+        "d_model": 896,
+        "mlp": "4D GELU",
+        "parameters": 244444032,
+        "flops_per_token": 2701133568,
+        "schedule_steps": 9325,
+        "planned_tokens": 1222246400,
+        "tokens_per_parameter": 5.000107345635667,
+        "reused_verified_runs": {
+          "1337": "20260825T204101.730861Z-reference-gmax-ladder-250m-dense-s1337-8ad47e4d",
+          "1338": "20260825T222152.930087Z-reference-gmax-ladder-250m-dense-s1338-dba22a67",
+          "1339": "20260826T000242.547386Z-reference-gmax-ladder-250m-dense-s1339-e896b3ee"
+        }
+      },
+      "fuzzy_h16d_k4d": {
+        "recipe": "fuzzy_topk_autoencoder",
+        "layers": 14,
+        "d_model": 896,
+        "dictionary_width": 14336,
+        "retained_width": 3584,
+        "group_size": 4,
+        "selector": "one ReLU winner from each fixed exchangeable feature group",
+        "decoder": "feature-specific row for every stored feature",
+        "backend": "choicewise",
+        "parameters": 495053440,
+        "semantic_flops_per_token": 2679113472,
+        "executed_flops_per_token": 4027844352,
+        "schedule_steps": 9402,
+        "planned_tokens": 1232338944,
+        "tokens_per_parameter": 2.489304879893371
+      }
+    }
+  },
+  "source_contract": {
+    "dense_train_py_sha256": "bdad3551bc1147fa0ce4f69d3faaa9b822bf9beff9442472d15e7f615f6af1cd",
+    "dense_config_sha256": "fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f",
+    "fuzzy_train_py_sha256": "56fce9a116c04f9c79accba9794885db18e9174f6ae437dc2bd1c2cab5dcc9a4",
+    "fuzzy_config_sha256": "d87fb0f72d4288e84221b74a4a4e45f43a03a284acbc442df884305889a30333"
+  },
+  "stopping_rule": "Run all six fuzzy tier/seed points through their complete cosine schedules; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
+}

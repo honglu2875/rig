@@ -147,6 +147,31 @@ question. Three already completed dense runs are reused only because their
 trainer/config hashes and every scientific coordinate exactly match this
 manifest. All three verify cleanly.
 
+## 125M and 250M ladder continuation
+
+The versioned
+[`ablation-ladder-125m-250m-3seed.json`](ablation-ladder-125m-250m-3seed.json)
+extends the paired-seed test to the next two dense ladder geometries. At each
+tier, the integer fuzzy depth nearest the dense FLOPs-per-token anchor is
+selected first. The fuzzy schedule is then rounded to the nearest complete
+global step at the dense run's total semantic matrix-FLOP budget.
+
+| tier | dense L / steps | fuzzy L / steps | dense tokens | fuzzy tokens | semantic mismatch | fuzzy physical / dense |
+|---|---:|---:|---:|---:|---:|---:|
+| 125M | 12 / 4,709 | 11 / 4,656 | 617,218,048 | 610,271,232 | +0.0088% | 1.390× |
+| 250M | 16 / 9,325 | 14 / 9,402 | 1,222,246,400 | 1,232,338,944 | +0.0038% | 1.503× |
+
+Both fuzzy points retain the same `H=16D`, `K=4D`, group-size-four mechanism
+as the 60M treatment: `H=10,240`, `K=2,560` at 125M and `H=14,336`,
+`K=3,584` at 250M. The larger physical counts again measure the regular
+choicewise contractions and do not shorten the scientific learning horizon.
+
+Dense controls for seeds 1337–1339 at both tiers already exist. They are reused
+only after artifact verification and exact agreement on trainer/config hashes,
+dataset and validation contract, seed, topology, batch, LR, context, and the
+ordinary 5-TPP dense schedule. The continuation therefore queues six fuzzy
+runs, ordered 125M before 250M and by increasing seed within each tier.
+
 ## Commands
 
 CPU wiring and deterministic plan:
