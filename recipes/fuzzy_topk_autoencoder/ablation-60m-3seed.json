@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-60m-3seed",
+  "objective": "Compare the quality of a 16D dictionary with fuzzy grouped K=4D selection against the matched dense GELU baseline over three paired seeds.",
+  "hypothesis": "One fixed-group winner out of every four stored features retains enough of the useful overcomplete-dictionary behavior to match or improve on dense validation loss at the parent sparse study's equal-algorithmic-FLOP endpoint.",
+  "common": {
+    "profile": "dev",
+    "tier": "60m",
+    "context": "8k",
+    "document_masking": true,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "validation_predictions": 1048576,
+    "batch_size": 16,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "data_order": "paired by seed",
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4
+  },
+  "budget": {
+    "basis": "equal algorithmic matrix FLOPs inherited from the exact sparse-autoencoder grid",
+    "dense_total_flops": 221029692528918528,
+    "fuzzy_semantic_total_flops": 221065567115673600,
+    "relative_semantic_mismatch": 0.0001623111686751563,
+    "fuzzy_executed_total_flops": 280151604005437440,
+    "note": "The fuzzy executed count bills redundant regular MXU contractions used to eliminate the exact gather/TopK bottleneck; it is reported as systems overhead, not used to shorten the learning horizon."
+  },
+  "arms": {
+    "dense": {
+      "recipe": "reference",
+      "layers": 12,
+      "d_model": 384,
+      "mlp": "4D GELU",
+      "parameters": 59918208,
+      "schedule_steps": 2286,
+      "planned_tokens": 299630592,
+      "tokens_per_parameter": 5.000660099848113,
+      "reused_verified_runs": {
+        "1337": "20260825T183817.778630Z-reference-gmax-ladder-60m-dense-s1337-38ef1d69",
+        "1338": "20260825T184918.694649Z-reference-gmax-ladder-60m-dense-s1338-9656b987",
+        "1339": "20260825T190013.034910Z-reference-gmax-ladder-60m-dense-s1339-4171ed72"
+      },
+      "train_py_sha256": "bdad3551bc1147fa0ce4f69d3faaa9b822bf9beff9442472d15e7f615f6af1cd",
+      "config_sha256": "fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f"
+    },
+    "fuzzy_h16d_k4d": {
+      "recipe": "fuzzy_topk_autoencoder",
+      "layers": 11,
+      "d_model": 384,
+      "dictionary_width": 6144,
+      "retained_width": 1536,
+      "group_size": 4,
+      "selector": "one ReLU winner from each fixed exchangeable feature group",
+      "decoder": "feature-specific row for every stored feature",
+      "backend": "choicewise",
+      "parameters": 97123584,
+      "schedule_steps": 2316,
+      "planned_tokens": 303562752,
+      "tokens_per_parameter": 3.125530787661213
+    }
+  },
+  "stopping_rule": "Run every fuzzy seed through its complete 2316-step cosine schedule; do not stop or retry based on intermediate loss."
+}

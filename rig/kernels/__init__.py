@@ -10,6 +10,14 @@ from .linear_cross_entropy import (
     tiled_tied_cross_entropy,
     tiled_tied_cross_entropy_losses,
 )
+from .fuzzy_topk import (
+    FuzzyTopKCallable,
+    FuzzyTopKConfig,
+    fuzzy_topk_mlp,
+    fuzzy_topk_relu,
+    make_mesh_fuzzy_topk_mlp,
+    naive_fuzzy_topk_mlp,
+)
 from .sparse_mlp import (
     SparseMlpCallable,
     SparseMlpConfig,
@@ -34,12 +42,18 @@ __all__ = (
     "DEFAULT_VOCAB_TILE_SIZE",
     "AttentionConfig",
     "AttentionTiles",
+    "FuzzyTopKCallable",
+    "FuzzyTopKConfig",
     "SparseMlpConfig",
     "SparseMlpCallable",
     "attention_tile_candidates",
     "causal_attention",
+    "fuzzy_topk_mlp",
+    "fuzzy_topk_relu",
     "make_causal_attention",
+    "make_mesh_fuzzy_topk_mlp",
     "make_mesh_sparse_topk_mlp",
+    "naive_fuzzy_topk_mlp",
     "naive_dense_topk_mlp",
     "pallas_sparse_decode",
     "reference_causal_attention",

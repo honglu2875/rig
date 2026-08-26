@@ -810,6 +810,8 @@ def command_profile(args: argparse.Namespace) -> int:
     scientific_args = _scientific_trainer_args(args)
     recipe_args = _recipe_specific_trainer_args(args)
     python_executable = root / ".venv" / "bin" / "python"
+    output_dir = resolve_path(args.output_dir, root)
+    xprof_dir = output_dir / "xprof"
     plan = resolve_recipe_plan(
         python_executable=python_executable,
         trainer=trainer,
@@ -818,6 +820,12 @@ def command_profile(args: argparse.Namespace) -> int:
             profile,
             *scientific_args,
             *recipe_args,
+            "--xprof-dir",
+            str(xprof_dir),
+            "--xprof-start-step",
+            str(args.xprof_start_step),
+            "--xprof-steps",
+            str(args.xprof_steps),
             "--diagnostic-mode",
         ),
         cwd=recipe_dir,
@@ -842,8 +850,6 @@ def command_profile(args: argparse.Namespace) -> int:
         f"{prepared.validation_tokens:,} validation tokens"
     )
 
-    output_dir = resolve_path(args.output_dir, root)
-    xprof_dir = output_dir / "xprof"
     dataset_id, tokenizer_id = _data_identity(
         run_data_type, prepared_name=prepared.name
     )
