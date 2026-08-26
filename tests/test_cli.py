@@ -681,7 +681,12 @@ class CliTests(unittest.TestCase):
             self.assertIn("--variant-mode trace", remote)
             self.assertIn("--xprof-dir", remote)
             self.assertIn("profiles/test/xprof", remote)
-            self.assertIn("--variant-mode", resolve.call_args.kwargs["arguments"])
+            plan_arguments = resolve.call_args.kwargs["arguments"]
+            self.assertIn("--variant-mode", plan_arguments)
+            self.assertIn("--xprof-dir", plan_arguments)
+            self.assertIn("profiles/test/xprof", " ".join(plan_arguments))
+            self.assertIn("--xprof-start-step", plan_arguments)
+            self.assertIn("--xprof-steps", plan_arguments)
             sync.assert_called_once()
 
     def test_report_has_no_admission_knobs(self) -> None:

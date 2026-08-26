@@ -1,0 +1,61 @@
+# Standalone CPU smoke configuration for recipes/fuzzy_topk_autoencoder/train.py.
+#
+# The tiny family uses the same schema as the scientific ladder. Nothing is
+# inherited from config.yaml or dev.yaml.
+schema_version: 6
+execution_type: smoke
+family:
+  default_tier: smoke
+  default_context: smoke
+  contexts:
+    smoke:
+      seq_len: 32
+      reference_batch_size: 4
+      document_masking: false
+  parameterization:
+    name: standard
+    base_tier: smoke
+    depth_alpha: 0.0
+    init_std: 0.02
+    attention_scale: inverse_sqrt_head_dim
+    embeddings: tied
+  tiers:
+    smoke:
+      model:
+        layers: 2
+        heads: 2
+        d_model: 64
+        mlp_mult: 8
+        mlp_top_k: 16
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 256
+        semantic_vocab_size: 256
+
+run:
+  training:
+    duration:
+      steps: 2
+    sampling: random_windows
+    dtype: float32
+  kernels:
+    attention_backend: dense
+    sparse_mlp_backend: choicewise
+    loss_backend: dense
+    vocab_tile_size: 2048
+  optimizer:
+    learning_rate: 0.0003
+    min_lr_ratio: 0.1
+    warmup_ratio: 0.1
+    weight_decay: 0.1
+    adam_epsilon: 1.0e-8
+    beta1: 0.9
+    beta2: 0.95
+    grad_clip: 0.0
+  evaluation:
+    final_predictions: 128
+    probe: null
+  logging:
+    diagnostics_every: 0
+    log_every: 10
