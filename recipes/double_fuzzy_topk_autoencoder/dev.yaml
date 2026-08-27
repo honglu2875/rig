@@ -98,7 +98,7 @@ run:
     dtype: bfloat16
   kernels:
     attention_backend: tpu_flash
-    sparse_mlp_backend: pallas_up
+    sparse_mlp_backend: choicewise
     sparse_mlp_token_block: 32
     sparse_mlp_output_block: 128
     loss_backend: tiled

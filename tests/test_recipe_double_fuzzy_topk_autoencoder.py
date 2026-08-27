@@ -47,7 +47,7 @@ class DoubleFuzzyTopKRecipeTests(unittest.TestCase):
         self.assertEqual(config.mlp_mult, 16)
         self.assertEqual(config.mlp_top_k, 4 * config.d_model)
         self.assertEqual(config.mlp_input_group_size, 4)
-        self.assertEqual(config.sparse_mlp_backend, "pallas_up")
+        self.assertEqual(config.sparse_mlp_backend, "choicewise")
         self.assertEqual(config.sparse_mlp_token_block, 32)
         self.assertEqual(config.sparse_mlp_output_block, 128)
         self.assertEqual(config.declared_parameters, 102_440_832)

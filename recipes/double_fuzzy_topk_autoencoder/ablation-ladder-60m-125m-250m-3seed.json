@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "planned_pending_v4_timing_gate_retry",
+  "status": "planned_pending_composed_choicewise_gate",
   "study_id": "fuzzy-topk-three-arm-ladder-double-fuzzy-launch-plan",
   "parent_study": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json",
@@ -33,38 +33,39 @@
     "accelerator": "TPU v4",
     "tpu_vm_count": 4,
     "chips_per_host": 4,
-    "backend": "pallas_up",
-    "experimental_backend": "pallas_up_dx",
+    "backend": "choicewise",
+    "experimental_backends": ["pallas_up", "pallas_up_dx"],
     "pallas_token_block": 32,
     "pallas_output_block": 128
   },
   "budget": {
     "basis": "Hold H/D=16, Q/D=1/4, and K/D=4; choose 64-aligned D and a nearby depth around the preceding fuzzy treatment, then round the schedule to the nearest complete global step at the dense run's total active matrix-FLOP budget.",
     "active_mlp_training_flops_per_token_per_layer": "2QH + 6KD + 4QK = 36D^2",
+    "choicewise_issued_mlp_training_flops_per_token_per_layer": "12DH = 192D^2",
     "pallas_up_issued_mlp_training_flops_per_token_per_layer": "2QH + 10DH = 168D^2",
     "pallas_up_dx_candidate_flops_per_token_per_layer": "2QH + 8DH + 2K*ceil(D/128)*128",
-    "implementation_note": "The default Pallas backend processes two adjacent four-coordinate input groups per physical eight-row TPU tile, reuses that tile across a token block, and retains bounded choicewise contractions for DOWN and the reverse pass. The experimental pallas_up_dx backend also skips hidden rows in the input cotangent but introduces a long K assignment grid. Active and issued counts are reported separately; the v4 gate chooses on latency, not nominal FLOPs.",
+    "implementation_note": "The quality backend zero-fills the signed inner winners and reuses the parent fuzzy choicewise MLP, issuing large regular UP contractions and the established four-choice DOWN path. It does not physically skip zero-input products, but avoids the factorized reverse pass's 16 small inner/outer-choice contractions. The selected-row Pallas backend is retained only for fused-kernel research after its 19.60K-token/s v4 gate rejection. Active and issued counts are reported separately.",
     "tiers": {
       "60m": {
         "dense_total_flops": 221029692528918528,
         "treatment_active_total_flops": 221071638823698432,
         "relative_active_mismatch": 0.00018977674130554173,
-        "treatment_issued_total_flops": 299758059616468992,
-        "issued_flops_relative_to_dense": 1.356189099241723
+        "treatment_issued_total_flops": 314064681578790912,
+        "issued_flops_relative_to_dense": 1.4209162487872533
       },
       "125m": {
         "dense_total_flops": 846214831747891200,
         "treatment_active_total_flops": 846135151665610752,
         "relative_active_mismatch": -0.00009416058344842542,
-        "treatment_issued_total_flops": 1288420032572817408,
-        "issued_flops_relative_to_dense": 1.5225684828893076
+        "treatment_issued_total_flops": 1368835465465036800,
+        "issued_flops_relative_to_dense": 1.6175980544298088
       },
       "250m": {
         "dense_total_flops": 3301450779407155200,
         "treatment_active_total_flops": 3301404905029238784,
         "relative_active_mismatch": -0.000013895217884985009,
-        "treatment_issued_total_flops": 5662469786236354560,
-        "issued_flops_relative_to_dense": 1.7151459054171239
+        "treatment_issued_total_flops": 6091754310092193792,
+        "issued_flops_relative_to_dense": 1.8451749600780345
       }
     }
   },
@@ -93,7 +94,7 @@
         "hidden_retained_width": 1792,
         "parameters": 117429312,
         "active_flops_per_token": 744326016,
-        "issued_flops_per_token": 1009255296,
+        "issued_flops_per_token": 1057424256,
         "schedule_steps": 2266,
         "planned_tokens": 297009152,
         "cli_overrides": [
@@ -128,7 +129,7 @@
         "hidden_retained_width": 2816,
         "parameters": 267270784,
         "active_flops_per_token": 1376732544,
-        "issued_flops_per_token": 2096366976,
+        "issued_flops_per_token": 2227209600,
         "schedule_steps": 4689,
         "planned_tokens": 614596608,
         "cli_overrides": [
@@ -163,7 +164,7 @@
         "hidden_retained_width": 4096,
         "parameters": 631835648,
         "active_flops_per_token": 2709522432,
-        "issued_flops_per_token": 4647290880,
+        "issued_flops_per_token": 4999612416,
         "schedule_steps": 9296,
         "planned_tokens": 1218445312,
         "cli_overrides": [
@@ -177,9 +178,9 @@
   },
   "source_contract": {
     "cloned_parent_revision": "f7ece1c",
-    "train_py_sha256": "90b4fa0f66c08c50b787ce157f5ad6488ff9a0ce5eba503d295220d5f3c57d93",
-    "dev_config_sha256": "17bd4f76cf5b53f51dc5098c172587a5837ff6eda794cc43c50d2b799e77c3df",
-    "kernel_sha256": "199e2513ef69daf7d12cf5ea471f25ffc136f5361599622240d7984f58e4627a"
+    "train_py_sha256": "613455893a4a08ee1e8a76c928ab7e45d8afa2b464577b386f78b8a81d913916",
+    "dev_config_sha256": "a3baadb6db626dafd69c2415204a063f125bac2e37f3cb42cfb940d713523da7",
+    "kernel_sha256": "b202aa2558a2e50e5ec527849c2ec14d601bdcb9609601183190e2f2d67bb7de"
   },
   "timing_gate_history": [
     {
@@ -201,8 +202,33 @@
       "outcome": "compile_failed_before_training",
       "error": "8-bit subelement masking is only supported for TPU v5+",
       "resolution": "Transport scalar-prefetched winner indices as int32 instead of int8 for TPU v4 Mosaic compatibility; repeat the unchanged gate on the patched revision."
+    },
+    {
+      "attempt": 3,
+      "date_utc": "2026-08-27",
+      "revision": "dc6325a",
+      "backend": "pallas_up",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "compiled_but_rejected_for_throughput",
+      "observed_tokens_per_second": 19600,
+      "comparison": "68.2x slower than the 1.337M-token/s dense gate and 49.3x slower than the 966.06K-token/s fuzzy gate",
+      "additional_failure": "The partial XProf capture exhausted controller storage; its incomplete 715 MB xplane file was removed while retaining the provenance log.",
+      "resolution": "Do not use pallas_up for quality runs. Gate a composition that reuses the parent fuzzy choicewise kernel after zero-filling the inner winners."
+    },
+    {
+      "attempt": 4,
+      "date_utc": "2026-08-27",
+      "revision": "dc6325a",
+      "backend": "choicewise_factorized_reverse",
+      "run_id": "20260827T105151.263701Z-double_fuzzy_topk_autoencoder-60m-preflight-double-fuzzy-choicewise-s1-8a942574",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "training_completed_but_backend_rejected_and_artifact_packaging_failed",
+      "observed_tokens_per_second": 432760,
+      "comparison": "2.23x slower than fuzzy and 3.09x slower than dense",
+      "packaging_error": "schema_version must be 1",
+      "resolution": "Compose the inner selector with the parent fuzzy choicewise custom VJP to remove 16 small reverse contractions, and restore trainer result schema version 1."
     }
   ],
-  "launch_policy": "Run a short one-seed v4-32 compile/timing/memory gate at 60m before launching the sequential three-seed ladder. Do not silently retry or interpret timing-gate loss.",
+  "launch_policy": "Run a short one-seed v4-32 compile/timing/memory gate for the composed choicewise backend at 60m before launching the sequential three-seed ladder. Do not silently retry or interpret timing-gate loss.",
   "stopping_rule": "After the timing gate passes, run every treatment seed through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
 }
