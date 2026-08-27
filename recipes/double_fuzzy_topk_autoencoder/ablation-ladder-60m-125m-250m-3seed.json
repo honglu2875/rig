@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "status": "planned_pending_v4_timing_gate",
+  "study_id": "double-fuzzy-topk-ladder-60m-125m-250m-3seed",
+  "extends_study": "fuzzy-topk-ladder-125m-250m-3seed",
+  "objective": "Test whether sparsifying both projections with a signed one-of-four input selector and a ReLU one-of-four hidden selector preserves the fuzzy-TopK quality gain at matched active matrix FLOPs.",
+  "hypothesis": "The additional signed grouped input selector permits a wider residual stream at the dense ladder's active-compute budget without losing the useful H=16D, K=4D overcomplete-dictionary behavior.",
+  "scientific_delta_from_fuzzy_topk_autoencoder": {
+    "before": "DOWN(GROUPED_TOPK_RELU(UP(x)))",
+    "after": "DOWN(GROUPED_TOPK_RELU(UP(GROUPED_SIGNED_MAX(x))))",
+    "input_group_size": 4,
+    "input_retained_width": "Q=D/4",
+    "hidden_dictionary_width": "H=16D",
+    "hidden_retained_width": "K=4D",
+    "input_selector": "one signed maximum from every fixed contiguous four-coordinate group; no inner ReLU or magnitude ranking",
+    "hidden_selector": "one ReLU maximum from every fixed contiguous four-feature group",
+    "other_scientific_changes": "none"
+  },
+  "common": {
+    "profile": "dev",
+    "context": "8k",
+    "document_masking": true,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "validation_predictions": 1048576,
+    "batch_size": 16,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "data_order": "paired by tier and seed",
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "backend": "pallas_up",
+    "experimental_backend": "pallas_up_dx",
+    "pallas_token_block": 32,
+    "pallas_output_block": 128
+  },
+  "budget": {
+    "basis": "Hold H/D=16, Q/D=1/4, and K/D=4; choose 64-aligned D and a nearby depth around the preceding fuzzy treatment, then round the schedule to the nearest complete global step at the dense run's total active matrix-FLOP budget.",
+    "active_mlp_training_flops_per_token_per_layer": "2QH + 6KD + 4QK = 36D^2",
+    "pallas_up_issued_mlp_training_flops_per_token_per_layer": "2QH + 10DH = 168D^2",
+    "pallas_up_dx_candidate_flops_per_token_per_layer": "2QH + 8DH + 2K*ceil(D/128)*128",
+    "implementation_note": "The default Pallas backend processes two adjacent four-coordinate input groups per physical eight-row TPU tile, reuses that tile across a token block, and retains bounded choicewise contractions for DOWN and the reverse pass. The experimental pallas_up_dx backend also skips hidden rows in the input cotangent but introduces a long K assignment grid. Active and issued counts are reported separately; the v4 gate chooses on latency, not nominal FLOPs.",
+    "tiers": {
+      "60m": {
+        "dense_total_flops": 221029692528918528,
+        "treatment_active_total_flops": 221071638823698432,
+        "relative_active_mismatch": 0.00018977674130554173,
+        "treatment_issued_total_flops": 299758059616468992,
+        "issued_flops_relative_to_dense": 1.356189099241723
+      },
+      "125m": {
+        "dense_total_flops": 846214831747891200,
+        "treatment_active_total_flops": 846135151665610752,
+        "relative_active_mismatch": -0.00009416058344842542,
+        "treatment_issued_total_flops": 1288420032572817408,
+        "issued_flops_relative_to_dense": 1.5225684828893076
+      },
+      "250m": {
+        "dense_total_flops": 3301450779407155200,
+        "treatment_active_total_flops": 3301404905029238784,
+        "relative_active_mismatch": -0.000013895217884985009,
+        "treatment_issued_total_flops": 5662469786236354560,
+        "issued_flops_relative_to_dense": 1.7151459054171239
+      }
+    }
+  },
+  "tiers": {
+    "60m": {
+      "dense": {
+        "recipe": "reference",
+        "layers": 12,
+        "d_model": 384,
+        "flops_per_token": 737673984,
+        "schedule_steps": 2286,
+        "planned_tokens": 299630592,
+        "reused_verified_runs": {
+          "1337": "20260825T183817.778630Z-reference-gmax-ladder-60m-dense-s1337-38ef1d69",
+          "1338": "20260825T184918.694649Z-reference-gmax-ladder-60m-dense-s1338-9656b987",
+          "1339": "20260825T190013.034910Z-reference-gmax-ladder-60m-dense-s1339-4171ed72"
+        }
+      },
+      "double_fuzzy_h16d_qd4_k4d": {
+        "recipe": "double_fuzzy_topk_autoencoder",
+        "layers": 10,
+        "d_model": 448,
+        "heads": 7,
+        "dictionary_width": 7168,
+        "input_retained_width": 112,
+        "hidden_retained_width": 1792,
+        "parameters": 117429312,
+        "active_flops_per_token": 744326016,
+        "issued_flops_per_token": 1009255296,
+        "schedule_steps": 2266,
+        "planned_tokens": 297009152,
+        "cli_overrides": [
+          "--sparse-d-model", "448",
+          "--sparse-layers", "10",
+          "--sparse-top-k", "1792",
+          "--sparse-training-steps", "2266"
+        ]
+      }
+    },
+    "125m": {
+      "dense": {
+        "recipe": "reference",
+        "layers": 12,
+        "d_model": 640,
+        "flops_per_token": 1371014400,
+        "schedule_steps": 4709,
+        "planned_tokens": 617218048,
+        "reused_verified_runs": {
+          "1337": "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+          "1338": "20260825T194108.904905Z-reference-gmax-ladder-125m-dense-s1338-318eab6f",
+          "1339": "20260825T201107.229311Z-reference-gmax-ladder-125m-dense-s1339-32ad584a"
+        }
+      },
+      "double_fuzzy_h16d_qd4_k4d": {
+        "recipe": "double_fuzzy_topk_autoencoder",
+        "layers": 11,
+        "d_model": 704,
+        "heads": 11,
+        "dictionary_width": 11264,
+        "input_retained_width": 176,
+        "hidden_retained_width": 2816,
+        "parameters": 267270784,
+        "active_flops_per_token": 1376732544,
+        "issued_flops_per_token": 2096366976,
+        "schedule_steps": 4689,
+        "planned_tokens": 614596608,
+        "cli_overrides": [
+          "--sparse-d-model", "704",
+          "--sparse-layers", "11",
+          "--sparse-top-k", "2816",
+          "--sparse-training-steps", "4689"
+        ]
+      }
+    },
+    "250m": {
+      "dense": {
+        "recipe": "reference",
+        "layers": 16,
+        "d_model": 896,
+        "flops_per_token": 2701133568,
+        "schedule_steps": 9325,
+        "planned_tokens": 1222246400,
+        "reused_verified_runs": {
+          "1337": "20260825T204101.730861Z-reference-gmax-ladder-250m-dense-s1337-8ad47e4d",
+          "1338": "20260825T222152.930087Z-reference-gmax-ladder-250m-dense-s1338-dba22a67",
+          "1339": "20260826T000242.547386Z-reference-gmax-ladder-250m-dense-s1339-e896b3ee"
+        }
+      },
+      "double_fuzzy_h16d_qd4_k4d": {
+        "recipe": "double_fuzzy_topk_autoencoder",
+        "layers": 14,
+        "d_model": 1024,
+        "heads": 16,
+        "dictionary_width": 16384,
+        "input_retained_width": 256,
+        "hidden_retained_width": 4096,
+        "parameters": 631835648,
+        "active_flops_per_token": 2709522432,
+        "issued_flops_per_token": 4647290880,
+        "schedule_steps": 9296,
+        "planned_tokens": 1218445312,
+        "cli_overrides": [
+          "--sparse-d-model", "1024",
+          "--sparse-layers", "14",
+          "--sparse-top-k", "4096",
+          "--sparse-training-steps", "9296"
+        ]
+      }
+    }
+  },
+  "source_contract": {
+    "cloned_parent_revision": "f7ece1c",
+    "train_py_sha256": "90b4fa0f66c08c50b787ce157f5ad6488ff9a0ce5eba503d295220d5f3c57d93",
+    "dev_config_sha256": "17bd4f76cf5b53f51dc5098c172587a5837ff6eda794cc43c50d2b799e77c3df",
+    "kernel_sha256": "0f2e6a409972aa3e41f4349aba9fc2adbe5b8063052fd2567ea5cde3af3f0e6c"
+  },
+  "launch_policy": "Run a short one-seed v4-32 compile/timing/memory gate at 60m before launching the sequential three-seed ladder. Do not silently retry or interpret timing-gate loss.",
+  "stopping_rule": "After the timing gate passes, run every treatment seed through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
+}
