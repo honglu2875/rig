@@ -172,6 +172,49 @@ dataset and validation contract, seed, topology, batch, LR, context, and the
 ordinary 5-TPP dense schedule. The continuation therefore queues six fuzzy
 runs, ordered 125M before 250M and by increasing seed within each tier.
 
+## Unified dense / fuzzy / doubly-fuzzy research
+
+The canonical three-arm contract is
+[`ablation-three-arm-ladder-60m-125m-250m-3seed.json`](ablation-three-arm-ladder-60m-125m-250m-3seed.json).
+It presents the completed dense and fuzzy runs together with the pending
+[`double_fuzzy_topk_autoencoder`](../double_fuzzy_topk_autoencoder/) arm as one
+paired-seed research ladder. The implementation recipes remain separate: this
+directory owns fuzzy TopK, while the sibling directory owns doubly-fuzzy TopK.
+
+`Tier` is the dense-equivalent active-compute ladder label, not the stored
+parameter count of every arm. `H` is stored MLP width, `Q` is the active input
+width into UP, and `K` is the active hidden width into DOWN.
+
+| tier | dense `L` | dense `D` | dense `H` | fuzzy `L` | fuzzy `D` | fuzzy `H` | fuzzy `K` | double `L` | double `D` | double `Q` | double `H` | double `K` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 60M | 12 | 384 | 1,536 (`4D`) | 11 | 384 | 6,144 (`16D`) | 1,536 (`4D`) | 10 | 448 | 112 (`D/4`) | 7,168 (`16D`) | 1,792 (`4D`) |
+| 125M | 12 | 640 | 2,560 (`4D`) | 11 | 640 | 10,240 (`16D`) | 2,560 (`4D`) | 11 | 704 | 176 (`D/4`) | 11,264 (`16D`) | 2,816 (`4D`) |
+| 250M | 16 | 896 | 3,584 (`4D`) | 14 | 896 | 14,336 (`16D`) | 3,584 (`4D`) | 14 | 1,024 | 256 (`D/4`) | 16,384 (`16D`) | 4,096 (`4D`) |
+
+Dense activates all `H=4D`. Fuzzy TopK applies the outer fixed-group
+one-of-four selector only. Doubly-fuzzy TopK additionally applies a signed
+inner one-of-four selector, so UP sees `Q=D/4`; its outer selector remains
+exactly the fuzzy arm's `K=4D` mechanism. Both selectors preserve original
+coordinate or feature identity.
+
+| tier | arm | stored parameters | active FLOPs/token | issued FLOPs/token | steps | quality-run status |
+|---|---|---:|---:|---:|---:|---|
+| 60M | dense | 59,918,208 | 737,673,984 | 737,673,984 | 2,286 | 3/3 complete, verified |
+| 60M | fuzzy | 97,123,584 | 728,236,800 | 922,878,720 | 2,316 | 3/3 complete, verified |
+| 60M | doubly fuzzy | 117,429,312 | 744,326,016 | 1,009,255,296 | 2,266 | pending v4-32 gate |
+| 125M | dense | 123,456,640 | 1,371,014,400 | 1,371,014,400 | 4,709 | 3/3 complete, verified |
+| 125M | fuzzy | 226,753,280 | 1,386,743,040 | 1,927,415,040 | 4,656 | 3/3 complete, verified |
+| 125M | doubly fuzzy | 267,270,784 | 1,376,732,544 | 2,096,366,976 | 4,689 | pending v4-32 gate |
+| 250M | dense | 244,444,032 | 2,701,133,568 | 2,701,133,568 | 9,325 | 3/3 complete, verified |
+| 250M | fuzzy | 495,053,440 | 2,679,113,472 | 4,027,844,352 | 9,402 | 3/3 complete, verified |
+| 250M | doubly fuzzy | 631,835,648 | 2,709,522,432 | 4,647,290,880 | 9,296 | pending v4-32 gate |
+
+The primary quality comparison is final validation loss at matched **total
+active** matrix FLOPs. Issued FLOPs, throughput, elapsed time, and stored
+parameters are separate systems and capacity measurements. The explicit step
+horizons make each arm's total active-compute mismatch less than 0.02% from
+its dense anchor.
+
 ## Commands
 
 CPU wiring and deterministic plan:

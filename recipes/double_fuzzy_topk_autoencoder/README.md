@@ -99,12 +99,17 @@ regular reverse work is intentional: on v4, sufficiently large MXU
 contractions can outrun much smaller graphs dominated by irregular gathers
 and serialized scatters.
 
-## Active-FLOP-matched ladder
+## Role in the unified three-arm ladder
 
-The versioned
+The canonical research contract is the fuzzy recipe's
+[`ablation-three-arm-ladder-60m-125m-250m-3seed.json`](../fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json).
+It presents dense, fuzzy TopK, and doubly-fuzzy TopK as one paired-seed study.
+This directory remains separate because it owns a distinct model and kernel;
+its versioned
 [`ablation-ladder-60m-125m-250m-3seed.json`](ablation-ladder-60m-125m-250m-3seed.json)
-pins the planned paired-seed study. It reuses the already verified dense
-controls and preserves `H=16D`, `Q=D/4`, and `K=4D` at every point.
+is the arm-specific launch plan, not a separate research result. It reuses the
+already verified dense controls and preserves `H=16D`, `Q=D/4`, and `K=4D` at
+every point.
 
 | tier | dense `L,D` | treatment `L,D` | active FLOPs/token | steps | total mismatch | issued/dense |
 |---|---:|---:|---:|---:|---:|---:|

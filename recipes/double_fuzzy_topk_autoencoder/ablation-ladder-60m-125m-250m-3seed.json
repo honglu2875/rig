@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
   "status": "planned_pending_v4_timing_gate",
-  "study_id": "double-fuzzy-topk-ladder-60m-125m-250m-3seed",
-  "extends_study": "fuzzy-topk-ladder-125m-250m-3seed",
-  "objective": "Test whether sparsifying both projections with a signed one-of-four input selector and a ReLU one-of-four hidden selector preserves the fuzzy-TopK quality gain at matched active matrix FLOPs.",
+  "study_id": "fuzzy-topk-three-arm-ladder-double-fuzzy-launch-plan",
+  "parent_study": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
+  "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json",
+  "objective": "Launch the doubly-fuzzy arm of the unified dense/fuzzy/doubly-fuzzy ladder after its v4-32 timing gate.",
   "hypothesis": "The additional signed grouped input selector permits a wider residual stream at the dense ladder's active-compute budget without losing the useful H=16D, K=4D overcomplete-dictionary behavior.",
   "scientific_delta_from_fuzzy_topk_autoencoder": {
     "before": "DOWN(GROUPED_TOPK_RELU(UP(x)))",
