@@ -46,11 +46,13 @@ Tests compare the output and gradients for `x`, `W_up`, `b_up`, `W_down`, and
 - `reference` gathers the selected rows for both projections. It is the
   numerical oracle and exposes the irregular-memory baseline.
 - `choicewise` is the TPU-oriented default and the quality-ladder backend. It
-  zero-fills the signed inner winners, then reuses the parent fuzzy recipe's
-  proven choicewise MLP unchanged. Its custom reverse rule issues large regular
-  UP contractions and the established four-choice DOWN path. It avoids the
-  earlier factorized reverse pass's 16 small inner/outer-choice contractions,
-  but it does not skip multiply-adds whose logical input is zero.
+  zero-fills the signed inner winners with a regular four-way mask, then reuses
+  the parent fuzzy recipe's proven choicewise MLP unchanged. The mask is
+  important: a token-wise dynamic scatter measured 3.61× slower on v4. Its
+  custom reverse rule issues large regular UP contractions and the established
+  four-choice DOWN path. It avoids the earlier factorized reverse pass's 16
+  small inner/outer-choice contractions, but it does not skip multiply-adds
+  whose logical input is zero.
 - `pallas_up` is a rejected experimental backend. A selected-row Pallas primitive
   skips the three unselected UP rows per input group in the forward pass. Its
   reverse path and the DOWN path retain bounded choicewise contractions, so
@@ -101,7 +103,11 @@ nominal sparse-gradient and decoder savings. On v4 its 56-stage input-group
 accumulator measured only 19.60K tokens/s at the 60M gate, versus 966.06K for
 the fuzzy baseline, so it is retained only as fused-kernel research and is not
 used for quality runs. The composed choicewise fallback deliberately issues
-the full regular UP contractions to preserve MXU utilization.
+the full regular UP contractions to preserve MXU utilization. Its accepted
+scatter-free 60M gate sustained 691.63K tokens/s (16.62% MFU): 1.40× slower
+than fuzzy and 1.93× slower than dense, while issuing 1.146× and 1.433× their
+respective matrix FLOPs. The same composition with a dynamic input scatter
+managed only 191.47K tokens/s.
 
 ## Role in the unified three-arm ladder
 
@@ -148,15 +154,15 @@ coordinate:
   --cluster v4-32 --profile dev --tier 60m --context 8k \
   --batch-size 16 --base-learning-rate 0.00390625 --seed 1350 \
   --stop-after-step 13 --checkpoint-policy none \
-  --name 60m-preflight-double-fuzzy-composed-choicewise-s1350 -- \
+  --name 60m-preflight-double-fuzzy-masked-choicewise-s1350 -- \
   --sparse-d-model 448 --sparse-layers 10 --sparse-top-k 1792 \
   --sparse-training-steps 2266 --sparse-mlp-backend choicewise
 ```
 
-The gate must establish compile success, peak-memory headroom, steady-state
-step time, and the absence of a serialized `Q`- or `K`-length fusion tail.
-Short-gate loss is not learning evidence. Only after that gate passes should
-the manifest's sequential three-seed quality ladder be launched.
+The verified gate established compile success, steady-state step time, and the
+absence of a serialized `Q`- or `K`-length fusion tail. Short-gate loss is not
+learning evidence. The manifest's sequential three-seed quality ladder is
+therefore queued on the accepted masked-choicewise fallback.
 
 The exact sequential ladder command is:
 

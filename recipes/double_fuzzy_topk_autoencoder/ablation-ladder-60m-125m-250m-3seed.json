@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "planned_pending_composed_choicewise_gate",
+  "status": "quality_ladder_queued_after_verified_masked_choicewise_gate",
   "study_id": "fuzzy-topk-three-arm-ladder-double-fuzzy-launch-plan",
   "parent_study": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json",
@@ -44,7 +44,7 @@
     "choicewise_issued_mlp_training_flops_per_token_per_layer": "12DH = 192D^2",
     "pallas_up_issued_mlp_training_flops_per_token_per_layer": "2QH + 10DH = 168D^2",
     "pallas_up_dx_candidate_flops_per_token_per_layer": "2QH + 8DH + 2K*ceil(D/128)*128",
-    "implementation_note": "The quality backend zero-fills the signed inner winners and reuses the parent fuzzy choicewise MLP, issuing large regular UP contractions and the established four-choice DOWN path. It does not physically skip zero-input products, but avoids the factorized reverse pass's 16 small inner/outer-choice contractions. The selected-row Pallas backend is retained only for fused-kernel research after its 19.60K-token/s v4 gate rejection. Active and issued counts are reported separately.",
+    "implementation_note": "The quality backend zero-fills the signed inner winners with a regular four-way mask and reuses the parent fuzzy choicewise MLP, issuing large regular UP contractions and the established four-choice DOWN path. It does not physically skip zero-input products, but avoids both a pathological token-wise scatter and the factorized reverse pass's 16 small inner/outer-choice contractions. The selected-row Pallas backend is retained only for fused-kernel research after its 19.60K-token/s v4 gate rejection. Active and issued counts are reported separately.",
     "tiers": {
       "60m": {
         "dense_total_flops": 221029692528918528,
@@ -178,9 +178,9 @@
   },
   "source_contract": {
     "cloned_parent_revision": "f7ece1c",
-    "train_py_sha256": "613455893a4a08ee1e8a76c928ab7e45d8afa2b464577b386f78b8a81d913916",
+    "train_py_sha256": "dd091aaaa66f4623893bd68d1e43eccce924167b33a881b4681c3f6f0ea8b26b",
     "dev_config_sha256": "a3baadb6db626dafd69c2415204a063f125bac2e37f3cb42cfb940d713523da7",
-    "kernel_sha256": "b202aa2558a2e50e5ec527849c2ec14d601bdcb9609601183190e2f2d67bb7de"
+    "kernel_sha256": "ef132d42381bfa099c3f2e69d851cea8fbd9660c75544f13c4bd20d5c441a13e"
   },
   "timing_gate_history": [
     {
@@ -227,8 +227,44 @@
       "comparison": "2.23x slower than fuzzy and 3.09x slower than dense",
       "packaging_error": "schema_version must be 1",
       "resolution": "Compose the inner selector with the parent fuzzy choicewise custom VJP to remove 16 small reverse contractions, and restore trainer result schema version 1."
+    },
+    {
+      "attempt": 5,
+      "date_utc": "2026-08-27",
+      "revision": "dbcc9ed",
+      "backend": "choicewise_composed_scatter",
+      "run_id": "20260827T110516.102660Z-double_fuzzy_topk_autoencoder-60m-preflight-double-fuzzy-composed-choi-0990698c",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "flop_trace_failed_before_compilation",
+      "error": "The composed custom VJP exposed additional residual operands, while the scoped FLOP rule assumed the original five-operand layout.",
+      "resolution": "Resolve the token and D-by-16D encoder operands by shape and pin the composed reverse trace in a regression test; repeat the unchanged gate."
+    },
+    {
+      "attempt": 6,
+      "date_utc": "2026-08-27",
+      "revision": "b853417",
+      "backend": "choicewise_composed_scatter",
+      "run_id": "20260827T111244.011824Z-double_fuzzy_topk_autoencoder-60m-preflight-double-fuzzy-composed-choi-5332ac69",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "verified_but_rejected_for_throughput",
+      "observed_tokens_per_second": 191474.1489289198,
+      "comparison": "5.05x slower than fuzzy, 6.98x slower than dense, and 2.26x slower than the factorized fallback",
+      "resolution": "Replace token-wise put_along_axis with a regular reshape-and-four-way winner mask before invoking the same parent fuzzy kernel."
+    },
+    {
+      "attempt": 7,
+      "date_utc": "2026-08-27",
+      "revision": "7bbcc2d",
+      "backend": "choicewise_composed_masked",
+      "run_id": "20260827T111740.279891Z-double_fuzzy_topk_autoencoder-60m-preflight-double-fuzzy-masked-choice-9618a96b",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "verified_and_accepted_for_quality_ladder",
+      "observed_tokens_per_second": 691630.843074656,
+      "observed_mfu": 0.16621527946928882,
+      "comparison": "1.40x slower than fuzzy and 1.93x slower than dense while issuing 1.146x and 1.433x their respective matrix FLOPs; 3.61x faster than the scatter composition",
+      "resolution": "Use choicewise_composed_masked for all nine quality runs; retain selected-row Pallas as isolated fused-kernel research."
     }
   ],
-  "launch_policy": "Run a short one-seed v4-32 compile/timing/memory gate for the composed choicewise backend at 60m before launching the sequential three-seed ladder. Do not silently retry or interpret timing-gate loss.",
+  "launch_policy": "The verified masked-choicewise 60m gate passed at 691630.84 tokens/s. Launch the nine quality runs sequentially in tier and seed order; do not silently retry or interpret timing-gate loss.",
   "stopping_rule": "After the timing gate passes, run every treatment seed through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
 }
