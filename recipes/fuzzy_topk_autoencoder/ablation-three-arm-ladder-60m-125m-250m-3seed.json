@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "dense_and_fuzzy_complete_double_fuzzy_quality_ladder_queued",
+  "status": "sealed_with_three_arm_60m_125m_complete_and_double_fuzzy_250m_incomplete",
   "study_id": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "objective": "Compare dense GELU, fuzzy grouped TopK on the DOWN projection, and doubly-fuzzy grouped TopK on both the UP and DOWN projections over paired three-seed 60M, 125M, and 250M dense-equivalent compute tiers.",
   "primary_comparison": "Final validation loss at matched total active matrix FLOPs within each tier; backend-issued FLOPs, wall time, throughput, and stored parameter count are reported separately and never substituted for the active-compute quality axis.",
@@ -52,7 +52,7 @@
       "input_width": "Q=D/4",
       "inner_group_size": 4,
       "outer_group_size": 4,
-      "inner_selector": "one signed maximum from each fixed exchangeable residual-coordinate group; no inner ReLU or magnitude ranking",
+      "inner_selector": "one signed maximum from each fixed exchangeable normalized-MLP-input coordinate group; no inner ReLU or magnitude ranking; the residual bypass is unchanged",
       "outer_selector": "one ReLU winner from each fixed exchangeable feature group",
       "decoder": "feature-specific row for every stored feature",
       "backend": "choicewise"
@@ -258,8 +258,34 @@
       }
     },
     "double_fuzzy_topk": {
-      "status": "queued_after_verified_masked_choicewise_gate",
-      "runs": {}
+      "status": "60m_and_125m_complete_and_verified_250m_incomplete",
+      "runs": {
+        "60m": {
+          "1337": "20260827T112312.877261Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1337-f8419b9e",
+          "1338": "20260827T113100.882214Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1338-84c0f8e7",
+          "1339": "20260827T113853.543392Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1339-c3a9031b"
+        },
+        "125m": {
+          "1337": "20260827T114641.595715Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1337-980d28c5",
+          "1338": "20260827T131455.097395Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1338-85083831",
+          "1339": "20260827T133935.506373Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1339-01dcef01"
+        }
+      },
+      "excluded_attempts": {
+        "250m_seed_1337": {
+          "run_id": "20260827T140422.396115Z-double_fuzzy_topk_autoencoder-250m-active-eqflop-double-fuzzy-s1337-8ebae840",
+          "status": "interrupted_by_3600_second_harness_timeout",
+          "last_logged_step": 5970,
+          "planned_steps": 9296,
+          "result_json": false,
+          "canonical_validation": false,
+          "archive_policy": "excluded_from_results_and_hugging_face_study"
+        },
+        "250m_seeds_1338_1339": {
+          "status": "not_launched_after_sequential_queue_stopped_for_inspection",
+          "archive_policy": "no_run_artifacts_exist"
+        }
+      }
     }
   },
   "provenance": {
@@ -268,10 +294,24 @@
       "recipes/fuzzy_topk_autoencoder/ablation-ladder-125m-250m-3seed.json"
     ],
     "double_fuzzy_launch_manifest": "recipes/double_fuzzy_topk_autoencoder/ablation-ladder-60m-125m-250m-3seed.json",
-    "artifact_verification": "All 18 dense and fuzzy run directories and the accepted double-fuzzy timing gate passed rig verify on 2026-08-27.",
+    "artifact_verification": "All 24 selected quality-run directories (nine dense, nine fuzzy, and six double-fuzzy) passed rig verify and a second coordinate/provenance/artifact-hash audit on 2026-08-27.",
     "accepted_double_fuzzy_gate": "20260827T111740.279891Z-double_fuzzy_topk_autoencoder-60m-preflight-double-fuzzy-masked-choice-9618a96b",
     "accepted_double_fuzzy_gate_tokens_per_second": 691630.843074656
   },
-  "launch_policy": "The documented masked-choicewise 60M v4-32 gate passed. Launch the nine doubly-fuzzy runs sequentially in 60M, 125M, 250M order and seeds 1337, 1338, 1339 within each tier.",
+  "sealed_evidence": {
+    "date_utc": "2026-08-27",
+    "included_runs": 24,
+    "complete_three_arm_tiers": [
+      "60m",
+      "125m"
+    ],
+    "two_arm_tiers": [
+      "250m"
+    ],
+    "primary_result": "Fuzzy TopK improves over dense for every paired seed at all three completed fuzzy tiers. Double-fuzzy is worse than fuzzy for every paired seed at 60M and 125M and is approximately tied with dense on the three-seed means.",
+    "evidence_boundary": "There is no completed double-fuzzy 250M endpoint, so no three-arm 250M quality conclusion is licensed. Timing gates and the partial 250M training curve are systems evidence only.",
+    "hugging_face_study": "fuzzy-topk-three-arm-ladder"
+  },
+  "launch_policy": "Historical protocol: after the masked-choicewise gate passed, launch double-fuzzy runs sequentially in 60M, 125M, 250M order and seeds 1337, 1338, 1339. The queue stopped when the first 250M run exceeded the 3600-second harness timeout.",
   "stopping_rule": "Run every quality cell through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
 }
