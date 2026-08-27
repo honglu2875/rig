@@ -179,7 +179,7 @@
     "cloned_parent_revision": "f7ece1c",
     "train_py_sha256": "90b4fa0f66c08c50b787ce157f5ad6488ff9a0ce5eba503d295220d5f3c57d93",
     "dev_config_sha256": "17bd4f76cf5b53f51dc5098c172587a5837ff6eda794cc43c50d2b799e77c3df",
-    "kernel_sha256": "b5a87b8e13140f27b3ae2f6964ea82763db56d6daf13a5361b3e80f73f908285"
+    "kernel_sha256": "199e2513ef69daf7d12cf5ea471f25ffc136f5361599622240d7984f58e4627a"
   },
   "timing_gate_history": [
     {
@@ -191,6 +191,16 @@
       "outcome": "compile_failed_before_training",
       "error": "Can only load scalars from SMEM",
       "resolution": "Replace vector slices of scalar-prefetched winner/value arrays with explicit scalar SMEM loads; repeat this exact gate once on the patched revision."
+    },
+    {
+      "attempt": 2,
+      "date_utc": "2026-08-27",
+      "revision": "bfc4281",
+      "backend": "pallas_up",
+      "coordinate": "60m/L10/D448/H7168/Q112/K1792, seed 1350, stop after step 13",
+      "outcome": "compile_failed_before_training",
+      "error": "8-bit subelement masking is only supported for TPU v5+",
+      "resolution": "Transport scalar-prefetched winner indices as int32 instead of int8 for TPU v4 Mosaic compatibility; repeat the unchanged gate on the patched revision."
     }
   ],
   "launch_policy": "Run a short one-seed v4-32 compile/timing/memory gate at 60m before launching the sequential three-seed ladder. Do not silently retry or interpret timing-gate loss.",
