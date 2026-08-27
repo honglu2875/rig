@@ -1800,16 +1800,29 @@ def double_fuzzy_topk_mlp_flop_rule(
         raise FlopError(
             f"unexpected double_fuzzy_topk_mlp boundary shapes: {site.in_shapes}"
         )
-    x_shape = site.in_shapes[0]
-    up_shape = site.in_shapes[1]
-    if len(x_shape) < 2 or len(up_shape) != 2:
+    model_width = config.d_model
+    hidden_width = config.mlp_mult * model_width
+    expected_up_shape = (model_width, hidden_width)
+    try:
+        up_operand = site.in_shapes.index(expected_up_shape)
+    except ValueError as error:
+        raise FlopError(
+            f"double_fuzzy_topk_mlp is missing encoder shape "
+            f"{expected_up_shape}: {site.in_shapes}"
+        ) from error
+    x_shape = next(
+        (
+            shape
+            for shape in site.in_shapes[:up_operand]
+            if len(shape) >= 2 and shape[-1] == model_width
+        ),
+        None,
+    )
+    if x_shape is None:
         raise FlopError(
             f"unexpected double_fuzzy_topk_mlp operands: {site.in_shapes}"
         )
     tokens = math.prod(x_shape[:-1])
-    model_width, hidden_width = up_shape
-    if model_width != x_shape[-1]:
-        raise FlopError("double_fuzzy_topk_mlp input and encoder widths disagree")
     input_top_k = model_width // config.mlp_input_group_size
     hidden_top_k = config.mlp_top_k
     is_forward = len(site.in_shapes) == 5

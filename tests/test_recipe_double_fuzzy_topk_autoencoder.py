@@ -173,6 +173,37 @@ class DoubleFuzzyTopKRecipeTests(unittest.TestCase):
             [warning for warning in physical.warnings if "double_fuzzy" in warning]
         )
 
+    def test_choicewise_flop_rule_accepts_composed_vjp_residuals(self) -> None:
+        config = resolved("smoke", "--sparse-mlp-backend", "choicewise")
+        params = trainer.init_params(config, 5)
+        physical = trainer.traced_flops(config, params)
+        active = trainer.active_traced_flops(config, params)
+        scope = "_choicewise_double_fuzzy_topk_mlp"
+        tokens = config.seq_len
+        d = config.d_model
+        h = config.mlp_mult * d
+        q = d // config.mlp_input_group_size
+        k = config.mlp_top_k
+        expected_physical_per_layer = 12 * tokens * d * h
+        expected_active_per_layer = 2 * tokens * (q * h + k * d) + 4 * (
+            tokens * k * (q + d)
+        )
+        self.assertEqual(
+            physical.by_site[scope],
+            config.layers * expected_physical_per_layer,
+        )
+        self.assertEqual(
+            active.by_site[scope],
+            config.layers * expected_active_per_layer,
+        )
+        self.assertFalse(
+            [
+                warning
+                for warning in (*physical.warnings, *active.warnings)
+                if "double_fuzzy" in warning
+            ]
+        )
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
