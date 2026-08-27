@@ -277,7 +277,10 @@ def _pallas_grouped_sparse_up_block(
             ),
             name="double_fuzzy_grouped_sparse_up",
         )(
-            winners.astype(jnp.int8),
+            # v4 Mosaic does not support masked 8-bit SMEM addressing. Keep
+            # the bounded prefetched indices in int32 so this kernel has the
+            # same transport contract on v4 and newer TPU generations.
+            winners.astype(jnp.int32),
             values,
             up_weight,
             up_bias[None, :],
