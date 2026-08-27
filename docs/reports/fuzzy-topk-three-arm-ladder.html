@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuzzy TopK — a three-arm active-compute ladder</title>
+  <meta name="description" content="Dense, fuzzy TopK, and doubly-fuzzy TopK transformer MLPs across paired three-seed 60M, 125M, and partial 250M active-compute tiers.">
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f4f1ea;
+      --card: #fffdf8;
+      --ink: #25251f;
+      --muted: #6c6d64;
+      --line: #d9d3c7;
+      --dense: #81766a;
+      --fuzzy: #197260;
+      --double: #9d543b;
+      --fuzzy-soft: #e0efe9;
+      --double-soft: #f4e8e1;
+      --blue: #356d92;
+      --shadow: 0 16px 44px rgba(48, 42, 31, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 88% 2%, rgba(25, 114, 96, .12), transparent 30rem),
+        radial-gradient(circle at 8% 36%, rgba(157, 84, 59, .07), transparent 25rem),
+        var(--paper);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.66;
+    }
+    main { width: min(1160px, calc(100% - 36px)); margin: 0 auto; padding: 54px 0 84px; }
+    h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; line-height: 1.13; }
+    h1 { max-width: 850px; margin: 0; font-size: clamp(2.5rem, 6vw, 5.35rem); letter-spacing: -.047em; }
+    h2 { margin: 0 0 20px; font-size: clamp(1.75rem, 3vw, 2.55rem); letter-spacing: -.028em; }
+    h3 { margin: 0 0 10px; font-size: 1.22rem; }
+    p { margin: 0 0 17px; }
+    a { color: var(--fuzzy); text-underline-offset: 3px; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .91em; }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(270px, .64fr);
+      gap: 36px;
+      align-items: end;
+      padding: 58px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 253, 248, .93);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow { margin: 0 0 14px; color: var(--fuzzy); font-size: .77rem; font-weight: 760; letter-spacing: .13em; text-transform: uppercase; }
+    .dek { max-width: 800px; margin: 24px 0 0; color: #4d5048; font-size: 1.12rem; }
+    .hero-note { padding: 22px 24px; border-left: 3px solid var(--double); background: var(--double-soft); color: #604034; font-size: .94rem; }
+    .hero-note strong { display: block; margin-bottom: 6px; color: #783f2d; }
+    .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0 70px; }
+    .fact { min-height: 128px; padding: 22px; border: 1px solid var(--line); border-radius: 15px; background: var(--card); }
+    .fact span { display: block; color: var(--muted); font-size: .75rem; font-weight: 740; letter-spacing: .075em; text-transform: uppercase; }
+    .fact strong { display: block; margin-top: 9px; font-family: Georgia, "Times New Roman", serif; font-size: 1.62rem; font-variant-numeric: tabular-nums; }
+    section { margin: 76px 0; }
+    .prose { max-width: 820px; }
+    .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+    .panel, .chart-card { border: 1px solid var(--line); border-radius: 18px; background: var(--card); }
+    .panel { padding: 29px; }
+    .panel p:last-child { margin-bottom: 0; }
+    .callout { margin: 30px 0; padding: 25px 29px; border: 1px solid #bad3c8; border-radius: 14px; background: var(--fuzzy-soft); color: #29483e; }
+    .callout strong { color: #174536; }
+    .caveat { margin: 28px 0; padding: 22px 25px; border-left: 4px solid var(--double); background: var(--double-soft); color: #59473e; }
+    .formula { margin: 24px 0; padding: 22px 25px; overflow-x: auto; border-radius: 13px; background: #272a25; color: #f5f2e9; font: .9rem/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 15px; background: var(--card); }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 11px 13px; border-bottom: 1px solid #e8e3d9; text-align: right; white-space: nowrap; }
+    th { background: #ece9e2; color: #5c5f57; font-size: .72rem; font-weight: 760; letter-spacing: .052em; text-transform: uppercase; }
+    th:first-child, td:first-child, .left { text-align: left; }
+    tr:last-child td { border-bottom: 0; }
+    tr.fuzzy td { background: rgba(224, 239, 233, .62); }
+    tr.double td { background: rgba(244, 232, 225, .58); }
+    .best { color: #145f4e; font-weight: 760; }
+    .missing { color: var(--muted); font-style: italic; }
+    .chart-card { padding: 18px 18px 11px; box-shadow: 0 9px 26px rgba(48, 42, 31, .045); }
+    .chart-head { display: flex; justify-content: space-between; gap: 22px; align-items: baseline; padding: 8px 10px 2px; }
+    .chart-head p { margin: 0; color: var(--muted); font-size: .86rem; }
+    svg { display: block; width: 100%; height: auto; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 19px; padding: 4px 12px 15px; color: #5b5d55; font-size: .8rem; }
+    .key { display: inline-flex; align-items: center; gap: 7px; }
+    .swatch { width: 17px; height: 3px; border-radius: 4px; background: currentColor; }
+    .small { color: var(--muted); font-size: .88rem; }
+    .hash { overflow-wrap: anywhere; white-space: normal; font-size: .78rem; }
+    .footer { margin-top: 88px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--muted); font-size: .86rem; }
+    @media (max-width: 850px) {
+      .hero { grid-template-columns: 1fr; padding: 35px 28px; }
+      .facts { grid-template-columns: 1fr 1fr; }
+      .grid-two { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 540px) {
+      main { width: min(100% - 22px, 1160px); padding-top: 22px; }
+      .facts { grid-template-columns: 1fr; }
+      .fact { min-height: auto; }
+      th, td { padding: 9px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">24 verified runs · paired seeds 1337–1339 · TPU v4-32</p>
+      <h1>Fuzzy competition works. Sparsifying its input does not.</h1>
+      <p class="dek">A fixed-group approximation to TopK preserves feature identity, removes the global selection bottleneck, and improves validation loss over dense at every paired seed from 60M through 250M. Adding a signed one-of-four selector before UP consistently gives that gain back.</p>
+    </div>
+    <aside class="hero-note">
+      <strong>Evidence boundary</strong>
+      The three-arm comparison is complete at 60M and 125M. The double-fuzzy 250M arm has no completed endpoint and supports no quality conclusion.
+    </aside>
+  </header>
+
+  <div class="facts" aria-label="Study summary">
+    <div class="fact"><span>Fuzzy wins vs dense</span><strong>9 / 9 seeds</strong></div>
+    <div class="fact"><span>Double loses vs fuzzy</span><strong>6 / 6 seeds</strong></div>
+    <div class="fact"><span>Fuzzy mean gain</span><strong>−0.0745 nat</strong></div>
+    <div class="fact"><span>Active-budget mismatch</span><strong>&lt; 0.02%</strong></div>
+  </div>
+
+  <section>
+    <div class="prose">
+      <p class="eyebrow">The result</p>
+      <h2>The outer approximation is the useful intervention</h2>
+      <p>At each completed tier, the fuzzy arm stores a <code>16D</code> dictionary and retains one ReLU winner from each fixed group of four, giving <code>K=4D</code>. Against the dense <code>4D</code> GELU control, its paired mean improvements are 0.078033 nats at 60M, 0.069399 at 125M, and 0.076030 at 250M. Every seed agrees on direction.</p>
+      <p>The double-fuzzy arm additionally keeps one signed coordinate from each group of four before UP. It stores more parameters and is matched on the same total active matrix-FLOP axis, yet it is worse than fuzzy by 0.076437 nats at 60M and 0.062993 at 125M. It lands close to dense rather than improving on fuzzy.</p>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-head"><div><h3>Three-seed validation means</h3><p>Lower is better. Whiskers are ±1 sample SD.</p></div></div>
+      <svg viewBox="0 0 780 455" role="img" aria-labelledby="loss-title loss-desc">
+        <title id="loss-title">Validation loss means for dense, fuzzy, and double-fuzzy arms</title>
+        <desc id="loss-desc">Fuzzy is below dense at 60M, 125M, and 250M. Double-fuzzy is close to dense and above fuzzy at 60M and 125M. No double-fuzzy 250M endpoint exists.</desc>
+        <rect width="780" height="455" rx="12" fill="#fffdf8"/>
+        <g stroke="#e3ded5" stroke-width="1">
+          <line x1="86" y1="52" x2="728" y2="52"/><line x1="86" y1="130" x2="728" y2="130"/>
+          <line x1="86" y1="208" x2="728" y2="208"/><line x1="86" y1="286" x2="728" y2="286"/>
+          <line x1="86" y1="364" x2="728" y2="364"/>
+        </g>
+        <g fill="#6c6d64" font-family="system-ui, sans-serif" font-size="12">
+          <text x="74" y="56" text-anchor="end">4.0</text><text x="74" y="134" text-anchor="end">3.8</text>
+          <text x="74" y="212" text-anchor="end">3.6</text><text x="74" y="290" text-anchor="end">3.4</text>
+          <text x="74" y="368" text-anchor="end">3.2</text>
+          <text x="183" y="407" text-anchor="middle">60M</text><text x="407" y="407" text-anchor="middle">125M</text><text x="631" y="407" text-anchor="middle">250M</text>
+          <text x="407" y="439" text-anchor="middle">dense-equivalent active-compute tier</text>
+          <text transform="translate(19 220) rotate(-90)" text-anchor="middle">validation loss</text>
+        </g>
+        <polyline points="183,51 407,187 631,293" fill="none" stroke="#81766a" stroke-width="3"/>
+        <polyline points="183,81 407,214 631,323" fill="none" stroke="#197260" stroke-width="3.5"/>
+        <polyline points="183,52 407,190" fill="none" stroke="#9d543b" stroke-width="3" stroke-dasharray="8 5"/>
+        <g stroke-width="2">
+          <g stroke="#81766a"><line x1="183" y1="50" x2="183" y2="52"/><line x1="407" y1="182" x2="407" y2="192"/><line x1="631" y1="291" x2="631" y2="295"/></g>
+          <g stroke="#197260"><line x1="183" y1="77" x2="183" y2="85"/><line x1="407" y1="212" x2="407" y2="216"/><line x1="631" y1="321" x2="631" y2="325"/></g>
+          <g stroke="#9d543b"><line x1="183" y1="50" x2="183" y2="54"/><line x1="407" y1="188" x2="407" y2="192"/></g>
+        </g>
+        <g fill="#fffdf8" stroke-width="3">
+          <g stroke="#81766a"><circle cx="183" cy="51" r="6"/><circle cx="407" cy="187" r="6"/><circle cx="631" cy="293" r="6"/></g>
+          <g stroke="#197260"><circle cx="183" cy="81" r="7"/><circle cx="407" cy="214" r="7"/><circle cx="631" cy="323" r="7"/></g>
+          <g stroke="#9d543b"><circle cx="183" cy="52" r="6"/><circle cx="407" cy="190" r="6"/></g>
+        </g>
+        <text x="631" y="254" text-anchor="middle" fill="#9d543b" font-family="system-ui, sans-serif" font-size="12">double-fuzzy: no endpoint</text>
+      </svg>
+      <div class="legend">
+        <span class="key" style="color:var(--dense)"><span class="swatch"></span>dense GELU</span>
+        <span class="key" style="color:var(--fuzzy)"><span class="swatch"></span>fuzzy TopK</span>
+        <span class="key" style="color:var(--double)"><span class="swatch"></span>double-fuzzy TopK</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Exact endpoints</p>
+    <h2>The paired-seed evidence</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tier / arm</th><th>Seed 1337</th><th>Seed 1338</th><th>Seed 1339</th><th>Mean ± sample SD</th><th>Δ vs dense</th></tr></thead>
+        <tbody>
+          <tr><td>60M · dense</td><td>4.002045</td><td>4.004242</td><td>4.002696</td><td>4.002994 ± 0.001129</td><td>—</td></tr>
+          <tr class="fuzzy"><td>60M · fuzzy</td><td>3.921874</td><td>3.935995</td><td>3.917013</td><td class="best">3.924961 ± 0.009860</td><td class="best">−0.078033</td></tr>
+          <tr class="double"><td>60M · double-fuzzy</td><td>3.999773</td><td>4.007992</td><td>3.996427</td><td>4.001398 ± 0.005951</td><td>−0.001597</td></tr>
+          <tr><td>125M · dense</td><td>3.641529</td><td>3.657767</td><td>3.666049</td><td>3.655115 ± 0.012473</td><td>—</td></tr>
+          <tr class="fuzzy"><td>125M · fuzzy</td><td>3.591915</td><td>3.581060</td><td>3.584173</td><td class="best">3.585716 ± 0.005590</td><td class="best">−0.069399</td></tr>
+          <tr class="double"><td>125M · double-fuzzy</td><td>3.653226</td><td>3.651055</td><td>3.641847</td><td>3.648709 ± 0.006041</td><td>−0.006406</td></tr>
+          <tr><td>250M · dense</td><td>3.379103</td><td>3.388256</td><td>3.385855</td><td>3.384405 ± 0.004746</td><td>—</td></tr>
+          <tr class="fuzzy"><td>250M · fuzzy</td><td>3.314136</td><td>3.304005</td><td>3.306984</td><td class="best">3.308375 ± 0.005207</td><td class="best">−0.076030</td></tr>
+          <tr class="double"><td>250M · double-fuzzy</td><td class="missing">incomplete</td><td class="missing">not launched</td><td class="missing">not launched</td><td class="missing">no endpoint</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">Loss is canonical FineWeb validation cross-entropy over 1,048,576 predictions. Means and sample SDs use only complete results; no value is imputed for 250M double-fuzzy.</p>
+
+    <div class="callout"><strong>Directional replication is unusually clean.</strong> Fuzzy minus dense is negative for every one of nine paired seeds. Double-fuzzy minus fuzzy is positive for every one of six paired seeds. With only three seeds per cell, this supports the direction and practical size of the effect, not a high-precision population estimate.</div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What changed</p>
+    <h2>One selector helps; the second changes the information path</h2>
+    <div class="grid-two">
+      <div class="panel">
+        <h3>Fuzzy TopK</h3>
+        <div class="formula">z = x_norm W_up + b_up
+(a, i) = GroupedTopK(ReLU(z), group_size=4)
+y = Σ a[j] W_down[i[j], :] + b_down</div>
+        <p>The fixed groups approximate global TopK without a large sort or a loop over <code>K</code>. Each stored feature retains its own decoder row. The model scores all <code>H=16D</code> features, then keeps <code>K=4D</code>.</p>
+      </div>
+      <div class="panel">
+        <h3>Double-fuzzy TopK</h3>
+        <div class="formula">(v, r) = GroupedSignedMax(x_norm, group_size=4)
+z = Σ v[q] W_up[r[q], :] + b_up
+(a, i) = GroupedTopK(ReLU(z), group_size=4)
+y = Σ a[j] W_down[i[j], :] + b_down</div>
+        <p>The added inner selector exposes only <code>Q=D/4</code> normalized coordinates to the learned MLP update. It ranks signed values, not magnitudes, and does not apply an inner ReLU.</p>
+      </div>
+    </div>
+    <div class="caveat"><strong>The residual stream is not discarded.</strong> These are pre-norm blocks: the full block input is saved as the residual bypass, while only <code>x_norm</code> entering the MLP branch is grouped. The block returns the unchanged bypass plus the selected MLP update. The negative result is therefore about the update's restricted readout, not loss of the identity path.</div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Matched design</p>
+    <h2>Capacity differs; total active matrix compute is matched</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tier / arm</th><th>L</th><th>D</th><th>Q into UP</th><th>Stored H</th><th>K into DOWN</th><th>Parameters</th><th>Active FLOPs/token</th><th>Issued FLOPs/token</th><th>Steps</th></tr></thead>
+        <tbody>
+          <tr><td>60M · dense</td><td>12</td><td>384</td><td>384</td><td>1,536</td><td>1,536</td><td>59,918,208</td><td>737,673,984</td><td>737,673,984</td><td>2,286</td></tr>
+          <tr class="fuzzy"><td>60M · fuzzy</td><td>11</td><td>384</td><td>384</td><td>6,144</td><td>1,536</td><td>97,123,584</td><td>728,236,800</td><td>922,878,720</td><td>2,316</td></tr>
+          <tr class="double"><td>60M · double</td><td>10</td><td>448</td><td>112</td><td>7,168</td><td>1,792</td><td>117,429,312</td><td>744,326,016</td><td>1,057,424,256</td><td>2,266</td></tr>
+          <tr><td>125M · dense</td><td>12</td><td>640</td><td>640</td><td>2,560</td><td>2,560</td><td>123,456,640</td><td>1,371,014,400</td><td>1,371,014,400</td><td>4,709</td></tr>
+          <tr class="fuzzy"><td>125M · fuzzy</td><td>11</td><td>640</td><td>640</td><td>10,240</td><td>2,560</td><td>226,753,280</td><td>1,386,743,040</td><td>1,927,415,040</td><td>4,656</td></tr>
+          <tr class="double"><td>125M · double</td><td>11</td><td>704</td><td>176</td><td>11,264</td><td>2,816</td><td>267,270,784</td><td>1,376,732,544</td><td>2,227,209,600</td><td>4,689</td></tr>
+          <tr><td>250M · dense</td><td>16</td><td>896</td><td>896</td><td>3,584</td><td>3,584</td><td>244,444,032</td><td>2,701,133,568</td><td>2,701,133,568</td><td>9,325</td></tr>
+          <tr class="fuzzy"><td>250M · fuzzy</td><td>14</td><td>896</td><td>896</td><td>14,336</td><td>3,584</td><td>495,053,440</td><td>2,679,113,472</td><td>4,027,844,352</td><td>9,402</td></tr>
+          <tr class="double"><td>250M · double</td><td>14</td><td>1,024</td><td>256</td><td>16,384</td><td>4,096</td><td>631,835,648</td><td>2,709,522,432</td><td>4,999,612,416</td><td>9,296</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small">Each arm rounds its explicit whole-step schedule to the dense tier's total active matrix-FLOP budget; mismatch is below 0.02%. This is not parameter matching, fixed-TPP matching, or equal wall time. “Issued” is what the current backend physically contracts.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Systems result</p>
+    <h2>The approximation removes the catastrophic TopK path, but not all overhead</h2>
+    <p class="prose">The original exact global TopK coordinate sustained only 22.53K tokens/s at the 60M timing gate, about 59× slower than dense. The fixed-group choicewise fuzzy kernel reached 966.06K tokens/s in that gate and 1.109M tokens/s averaged over the three complete 60M runs. It is a viable quality experiment, though still slower than dense because regular contractions execute more matrix work.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tier / arm</th><th>Mean tokens/s</th><th>Fraction of dense</th><th>Interpretation</th></tr></thead>
+        <tbody>
+          <tr><td>60M · dense</td><td>1,411,818</td><td>100.0%</td><td class="left">regular 4D GELU MLP</td></tr>
+          <tr class="fuzzy"><td>60M · fuzzy</td><td>1,108,731</td><td>78.5%</td><td class="left">four bounded choices, 1.251× issued FLOPs</td></tr>
+          <tr class="double"><td>60M · double</td><td>866,334</td><td>61.4%</td><td class="left">masked inner selector, 1.433× issued FLOPs</td></tr>
+          <tr><td>125M · dense</td><td>817,618</td><td>100.0%</td><td class="left">regular 4D GELU MLP</td></tr>
+          <tr class="fuzzy"><td>125M · fuzzy</td><td>578,142</td><td>70.7%</td><td class="left">choicewise outer selection</td></tr>
+          <tr class="double"><td>125M · double</td><td>462,813</td><td>56.6%</td><td class="left">masked inner selection plus choicewise outer</td></tr>
+          <tr><td>250M · dense</td><td>439,572</td><td>100.0%</td><td class="left">regular 4D GELU MLP</td></tr>
+          <tr class="fuzzy"><td>250M · fuzzy</td><td>286,017</td><td>65.1%</td><td class="left">choicewise outer selection</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="prose small">The double-fuzzy quality backend zero-fills the selected input coordinates and reuses regular UP contractions, so its semantic sparsity does not skip those products physically. A selected-row Pallas prototype did skip UP-forward products but reached only 19.60K tokens/s and was rejected. Fusion remains future systems work; the sealed quality claim does not depend on nominal sparse speed.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Protocol and provenance</p>
+    <h2>What is fixed, and what is archived</h2>
+    <div class="grid-two">
+      <div class="panel">
+        <h3>Common run contract</h3>
+        <p>FineWeb 8B GPT-2 tokens; canonical manifest SHA-256 <span class="mono hash">34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804</span>. Context 8,192 with document masking, global batch 16, base LR 2<sup>−8</sup>, seeds 1337–1339, 1,048,576 validation predictions, bfloat16, no checkpoints.</p>
+        <p>Every selected run used four processes and sixteen TPU v4 devices. All 24 passed <code>rig verify</code>, then a second audit checked model coordinates, schedules, topology, dataset identity, ledger identity, and every artifact byte count and SHA-256.</p>
+      </div>
+      <div class="panel">
+        <h3>Excluded evidence</h3>
+        <p>The first double-fuzzy 250M attempt stopped at step 5,970/9,296 when the development harness reached its 3,600-second timeout. It had a stable 228.74K tokens/s training path but no result or canonical validation. Seeds 1338 and 1339 were never launched.</p>
+        <p>All seven double-fuzzy timing-gate attempts—including failed compiles, rejected slow backends, and the accepted 13-step gate—are systems-development evidence only. None appear in endpoint means or the 24-run archive.</p>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:24px">
+      <table>
+        <thead><tr><th>Arm</th><th>Clean run commit</th><th>Trainer SHA-256</th><th>Config SHA-256</th><th>Shared Python tree SHA-256</th></tr></thead>
+        <tbody>
+          <tr><td>dense</td><td class="mono hash">fe2bd0f28888103fb473d0d8f70cca144a5488e9</td><td class="mono hash">bdad3551bc1147fa0ce4f69d3faaa9b822bf9beff9442472d15e7f615f6af1cd</td><td class="mono hash">fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f</td><td class="mono hash">39140a06180da9032e70342b9723ce857560d771bf510c73467fd5c7deaf187b</td></tr>
+          <tr class="fuzzy"><td>fuzzy</td><td class="mono hash">5d014ccdef84e179f9dc015e0e5f05871800fceb</td><td class="mono hash">56fce9a116c04f9c79accba9794885db18e9174f6ae437dc2bd1c2cab5dcc9a4</td><td class="mono hash">d87fb0f72d4288e84221b74a4a4e45f43a03a284acbc442df884305889a30333</td><td class="mono hash">17edeb9dc983fb3c12655de01bf4110d73ddc0e29e47561241c29d722ca6dc63</td></tr>
+          <tr class="double"><td>double-fuzzy</td><td class="mono hash">fd1d2542bc9d2735902a963a4eb24233526ac4fc</td><td class="mono hash">dd091aaaa66f4623893bd68d1e43eccce924167b33a881b4681c3f6f0ea8b26b</td><td class="mono hash">a3baadb6db626dafd69c2415204a063f125bac2e37f3cb42cfb940d713523da7</td><td class="mono hash">256bc28f1349958dd7e2043a7bc864f63de94b05409a654ec161e0cf2ac5bbab</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Reproduction</p>
+    <h2>Use the recorded clean commit for each arm</h2>
+    <p class="prose">The <a href="../../recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json">canonical manifest</a> supplies every width, depth, active width, step horizon, seed, and run ID. The <a href="../../recipes/double_fuzzy_topk_autoencoder/ablation-ladder-60m-125m-250m-3seed.json">double-fuzzy manifest</a> preserves the backend history and exclusion. A representative 60M fuzzy run is:</p>
+    <div class="formula">git checkout 5d014ccdef84e179f9dc015e0e5f05871800fceb
+uv run --frozen --no-sync rig run fuzzy_topk_autoencoder \
+  --cluster v4-32 --profile dev --tier 60m --context 8k \
+  --batch-size 16 --base-learning-rate 0.00390625 --seed 1337 \
+  --checkpoint-policy none \
+  --name 60m-eqflop-fuzzy-h16d-k4d-l11-s1337 -- \
+  --sparse-top-k 1536</div>
+    <p class="small">For dense, check out <code>fe2bd0f28888103fb473d0d8f70cca144a5488e9</code>; for double-fuzzy, check out <code>fd1d2542bc9d2735902a963a4eb24233526ac4fc</code>. Use the exact overrides in the manifest rather than inferring them from the tier label.</p>
+  </section>
+
+  <footer class="footer">
+    Sealed 2026-08-27. Browse the <a href="study-browser.html">interactive full-resolution study</a> or the <a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder">raw Hugging Face archive</a>. This page is static inline HTML/SVG with system fonts and no runtime fetch.
+  </footer>
+</main>
+</body>
+</html>

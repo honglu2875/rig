@@ -2,8 +2,10 @@
 
 This is an incremental fork of
 [`fuzzy_topk_autoencoder`](../fuzzy_topk_autoencoder/). It adds one scientific
-operation: before the UP projection, the normalized residual state is split
-into fixed groups of four and only the signed maximum in each group is kept.
+operation: before the UP projection, the normalized input to the MLP branch is
+split into fixed groups of four and only the signed maximum in each group is
+kept. The pre-norm residual bypass does not pass through this selector and is
+unchanged.
 The existing `H=16D`, grouped `K=4D` TopK-ReLU and feature-specific DOWN rows
 are unchanged.
 
@@ -30,7 +32,8 @@ the parent recipe.
 
 ## Why the groups are fixed
 
-At initialization, residual coordinates and feature triples are exchangeable.
+At initialization, normalized MLP-input coordinates and feature triples are
+exchangeable.
 A one-time random permutation followed by contiguous groups therefore has the
 same initial distribution as contiguous groups directly. Keeping the layout
 fixed avoids permutation traffic and PRNG state and makes a seed reproducible.
@@ -133,6 +136,27 @@ rounding then matches each dense run's total active matrix-FLOP budget.
 Parameter count and tokens-per-parameter vary intentionally, so these are
 explicit-step active-compute comparisons, not a fixed-TPP ladder.
 
+## Sealed result
+
+All three seeds completed and verified at 60M and 125M. Mean final validation
+loss is 4.001398 at 60M and 3.648709 at 125M, versus 3.924961 and 3.585716 for
+the outer-only fuzzy arm. Double-fuzzy is worse than fuzzy for every one of the
+six paired seeds. Against dense it is approximately neutral: −0.001597 nats
+at 60M and −0.006406 at 125M on the three-seed means.
+
+This is not a residual-stream failure. Each transformer block keeps the full
+pre-norm residual as `residual` and adds the MLP output back afterward. The
+signed one-of-four selector sees only the normalized MLP-branch input, so it
+restricts what the learned MLP update can read while leaving the identity
+bypass untouched. The result says this input restriction erases the quality
+gain from the outer fuzzy dictionary at the tested active-compute budgets.
+
+The first 250M treatment run exceeded the 3,600-second development-harness
+timeout at step 5,970/9,296. It produced no `result.json` and no canonical
+validation endpoint; the remaining two seeds were not launched. That partial
+curve is excluded from the quality result and from the sealed 24-run archive,
+so there is no licensed three-arm conclusion at 250M.
+
 ## Gates and commands
 
 CPU semantics and wiring:
@@ -161,8 +185,8 @@ coordinate:
 
 The verified gate established compile success, steady-state step time, and the
 absence of a serialized `Q`- or `K`-length fusion tail. Short-gate loss is not
-learning evidence. The manifest's sequential three-seed quality ladder is
-therefore queued on the accepted masked-choicewise fallback.
+learning evidence. The command below is the historical sequential protocol;
+the manifest records which cells completed and the exact 250M exclusion.
 
 The exact sequential ladder command is:
 

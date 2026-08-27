@@ -174,9 +174,10 @@ runs, ordered 125M before 250M and by increasing seed within each tier.
 
 ## Unified dense / fuzzy / doubly-fuzzy research
 
-The canonical three-arm contract is
+The canonical sealed three-arm contract is
 [`ablation-three-arm-ladder-60m-125m-250m-3seed.json`](ablation-three-arm-ladder-60m-125m-250m-3seed.json).
-It presents the completed dense and fuzzy runs together with the queued
+It presents the completed dense and fuzzy runs together with the completed
+60M/125M portion of the
 [`double_fuzzy_topk_autoencoder`](../double_fuzzy_topk_autoencoder/) arm as one
 paired-seed research ladder. The implementation recipes remain separate: this
 directory owns fuzzy TopK, while the sibling directory owns doubly-fuzzy TopK.
@@ -201,19 +202,43 @@ coordinate or feature identity.
 |---|---|---:|---:|---:|---:|---|
 | 60M | dense | 59,918,208 | 737,673,984 | 737,673,984 | 2,286 | 3/3 complete, verified |
 | 60M | fuzzy | 97,123,584 | 728,236,800 | 922,878,720 | 2,316 | 3/3 complete, verified |
-| 60M | doubly fuzzy | 117,429,312 | 744,326,016 | 1,057,424,256 | 2,266 | queued, masked-choicewise gate verified |
+| 60M | doubly fuzzy | 117,429,312 | 744,326,016 | 1,057,424,256 | 2,266 | 3/3 complete, verified |
 | 125M | dense | 123,456,640 | 1,371,014,400 | 1,371,014,400 | 4,709 | 3/3 complete, verified |
 | 125M | fuzzy | 226,753,280 | 1,386,743,040 | 1,927,415,040 | 4,656 | 3/3 complete, verified |
-| 125M | doubly fuzzy | 267,270,784 | 1,376,732,544 | 2,227,209,600 | 4,689 | queued, masked-choicewise gate verified |
+| 125M | doubly fuzzy | 267,270,784 | 1,376,732,544 | 2,227,209,600 | 4,689 | 3/3 complete, verified |
 | 250M | dense | 244,444,032 | 2,701,133,568 | 2,701,133,568 | 9,325 | 3/3 complete, verified |
 | 250M | fuzzy | 495,053,440 | 2,679,113,472 | 4,027,844,352 | 9,402 | 3/3 complete, verified |
-| 250M | doubly fuzzy | 631,835,648 | 2,709,522,432 | 4,999,612,416 | 9,296 | queued, masked-choicewise gate verified |
+| 250M | doubly fuzzy | 631,835,648 | 2,709,522,432 | 4,999,612,416 | 9,296 | incomplete; no endpoint |
 
 The primary quality comparison is final validation loss at matched **total
 active** matrix FLOPs. Issued FLOPs, throughput, elapsed time, and stored
 parameters are separate systems and capacity measurements. The explicit step
 horizons make each arm's total active-compute mismatch less than 0.02% from
 its dense anchor.
+
+The endpoint result is consistent across paired seeds:
+
+| tier | dense mean ± SD | fuzzy mean ± SD | doubly-fuzzy mean ± SD | fuzzy − dense | double − fuzzy |
+|---|---:|---:|---:|---:|---:|
+| 60M | 4.002994 ± 0.001129 | **3.924961 ± 0.009860** | 4.001398 ± 0.005951 | −0.078033 | +0.076437 |
+| 125M | 3.655115 ± 0.012473 | **3.585716 ± 0.005590** | 3.648709 ± 0.006041 | −0.069399 | +0.062993 |
+| 250M | 3.384405 ± 0.004746 | **3.308375 ± 0.005207** | — | −0.076030 | — |
+
+Fuzzy TopK beats dense for all nine paired seeds across the three tiers.
+Doubly-fuzzy is worse than fuzzy for all six paired seeds at 60M and 125M and
+returns approximately to the dense mean despite storing still more parameters.
+The inner selector acts only on the normalized input to the MLP branch; the
+pre-norm residual bypass remains intact. The evidence therefore says that
+discarding three of four coordinates from the learned MLP update erases the
+outer fuzzy dictionary's gain, not that the model loses its residual stream.
+
+The first doubly-fuzzy 250M run was interrupted by the development harness's
+3,600-second timeout at step 5,970/9,296. It has no `result.json` or canonical
+validation endpoint; seeds 1338 and 1339 were not launched after the sequential
+queue stopped. The partial curve and every short timing gate are excluded from
+the quality result and Hugging Face archive. See the static
+[`fuzzy-topk-three-arm-ladder` report](../../docs/reports/fuzzy-topk-three-arm-ladder.html)
+for the complete evidence and limitations.
 
 ## Commands
 
@@ -256,7 +281,6 @@ Short v4 timing gate:
   --sparse-top-k 1536 --sparse-mlp-backend reference
 ```
 
-Do not interpret short-gate loss. First establish compile success, steady step
-time, memory headroom, and the absence of a `K`-sized serialized fusion tail;
-only then solve an equal-physical-FLOP schedule and run a one-seed quality
-test.
+Do not interpret short-gate loss. The commands above reproduce the historical
+systems checks; the sealed quality evidence comes only from the 24 complete,
+verified runs named in the canonical manifest.

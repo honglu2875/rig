@@ -807,6 +807,53 @@ class StudyExportTests(unittest.TestCase):
             ],
         )
 
+    def test_fuzzy_sparse_mechanisms_are_archive_coordinates(self) -> None:
+        """Outer-only and double fuzzy runs cannot overwrite one another."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            models = (
+                {
+                    "d_model": 16,
+                    "layers": 11,
+                    "mlp_activation": "fuzzy_topk_relu",
+                    "mlp_mult": 16,
+                    "mlp_top_k": 64,
+                },
+                {
+                    "d_model": 16,
+                    "layers": 10,
+                    "mlp_activation": "double_fuzzy_topk_relu",
+                    "mlp_input_group_size": 4,
+                    "mlp_mult": 16,
+                    "mlp_top_k": 64,
+                },
+            )
+            for run, model in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                models,
+                strict=True,
+            ):
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
+                payload["seed"] = 1350
+                payload["contract"]["model"] = model
+                (run / "result.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(summary["runs"], 2)
+        self.assertEqual(
+            folders,
+            [
+                "60m-double-fuzzy-h16d-q0p25d-k4d-l10-5tpp-bs1-lr2e-8-s1350",
+                "60m-fuzzy-h16d-k4d-l11-5tpp-bs1-lr2e-8-s1350",
+            ],
+        )
+
     def test_a_duration_run_does_not_overwrite_the_reference_run_beside_it(
         self,
     ) -> None:
@@ -1010,6 +1057,43 @@ class StudyExportTests(unittest.TestCase):
         self.assertEqual(snapshot["diagnosticCharts"], [])
         self.assertEqual(snapshot["layerCharts"], [])
         self.assertTrue(snapshot["timeCharts"])
+
+    def test_exported_folder_mapping_remains_ledgered(self) -> None:
+        """Canonical archive folders retain the immutable source run ID."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            records = []
+            for run in sorted(path for path in runs.iterdir() if path.is_dir()):
+                result = json.loads((run / "result.json").read_text(encoding="utf-8"))
+                record = _record_for_run(run, validation=False)
+                record["seed"] = result["seed"]
+                records.append(record)
+            (runs / "records.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+
+            summary = export_study(runs, root / "out", "demo")
+            path = summary["path"]
+            exported_records = [
+                json.loads(line)
+                for line in (path / "records.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            snapshot = json.loads(
+                gzip.decompress((path / "snapshot.json.gz").read_bytes())
+            )
+
+        self.assertEqual(
+            {record["run_id"] for record in exported_records},
+            {record["run_id"] for record in records},
+        )
+        self.assertEqual(
+            {record["folder"] for record in exported_records},
+            {"60m-5tpp-bs1-lr2e-8-s1337", "60m-5tpp-bs1-lr2e-8-s1338"},
+        )
+        self.assertTrue(all(run["ledger"] for run in snapshot["runs"]))
 
 
 class StudyBrowserTests(unittest.TestCase):

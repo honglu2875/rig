@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 427 runs across eighteen studies, laid out as `<study>/<run-name>/`, at full
+— 451 runs across nineteen studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -53,6 +53,7 @@ by-product:
 | moe-weight-decay | exact endpoints | — | 0.04 MB |
 | gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.04 MB |
 | sparse-autoencoder-eqflop | exact endpoints + compute derivation | — | 0.02 MB |
+| fuzzy-topk-three-arm-ladder | exact endpoints + paired-seed/compute tables | — | 0.03 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -107,6 +108,13 @@ the declared forward/backward contraction budget, then shows how depth and
 whole optimizer steps make the full-model grid equal-FLOP. The 22 KiB page uses
 inline SVG and no runtime JavaScript or fetch. Throughput is included only to
 make the current kernel limitation explicit.
+
+`fuzzy-topk-three-arm-ladder.html` is a static paired-seed findings report over
+24 complete runs. It compares dense GELU, fixed-group fuzzy TopK, and a
+doubly-fuzzy input-plus-hidden selector at matched total active matrix FLOPs.
+The page reports every validation endpoint, sample SD, architecture, stored
+parameter count, issued FLOPs, throughput, provenance hash, and the explicit
+incomplete-250M evidence boundary. It uses inline SVG and no runtime fetch.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -180,6 +188,11 @@ The sparse-autoencoder study uses TPU v4 at 4 processes and 16 chips for all
 the selected-row implementation is memory/latency bound and much slower than
 the equal-algorithmic-FLOP dense anchor.
 
+The fuzzy TopK three-arm study also uses TPU v4 at 4 processes and 16 chips for
+all 24 archived runs. Its matched coordinate is total active matrix FLOPs;
+backend-issued FLOPs and throughput are reported separately. The incomplete
+double-fuzzy 250M attempt has no endpoint and is not in the archive.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -199,6 +212,7 @@ the equal-algorithmic-FLOP dense anchor.
 | [moe-weight-decay](moe-weight-decay.html) | 36 | 60M/125M | base AdamW weight decay × seed | [`moe-weight-decay`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-weight-decay) |
 | [gumbel-local-moe](gumbel-local-moe.html) | 8 | 125M | Gumbel-routed local MoE steps × seed | [`moe-gumbel-local-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M) |
 | [sparse-autoencoder-eqflop](sparse-autoencoder-eqflop.html) | 13 | 60M geometry | dictionary width × retained width at equal algorithmic FLOPs | [`sparse-autoencoder-eqflop-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M) |
+| [fuzzy-topk-three-arm-ladder](fuzzy-topk-three-arm-ladder.html) | 24 | 60M/125M/250M | dense vs fuzzy TopK vs double-fuzzy at matched active FLOPs | [`fuzzy-topk-three-arm-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -706,6 +720,51 @@ uv run --frozen --no-sync rig run sparse_autoencoder \
   --checkpoint-policy none --name 60m-eqflop-h16d-k1d-l12-s1350 -- \
   --sparse-layers 12 --sparse-mlp-mult 16 --sparse-top-k 384 \
   --sparse-training-steps 2319 --sparse-mlp-backend reference
+```
+
+## fuzzy-topk-three-arm-ladder.html
+
+Twenty-four verified paired-seed runs compare dense GELU, an outer fixed-group
+fuzzy TopK, and a doubly-fuzzy input-plus-hidden selector at 8k context. The
+three-arm result is complete at 60M and 125M; dense and fuzzy also complete at
+250M. Every schedule is matched to its dense tier's total active matrix-FLOP
+budget within 0.02%, while stored parameters and backend-issued FLOPs are
+reported rather than equated.
+
+The static [findings report](fuzzy-topk-three-arm-ladder.html) shows every
+endpoint and paired difference. Fuzzy beats dense in all nine paired seeds,
+with mean gains of 0.078033, 0.069399, and 0.076030 nats at 60M, 125M, and
+250M. Double-fuzzy loses to fuzzy in all six completed pairs by 0.076437 and
+0.062993 nats at 60M and 125M, returning approximately to dense quality
+despite its larger stored parameter count.
+
+The added signed one-of-four selector sees only the normalized input to the
+MLP branch. The full pre-norm residual remains the identity bypass, so the
+negative result is about restricting the learned update's input rather than
+deleting the model's residual stream. The current masked-choicewise backend
+also does not physically skip zero-input UP products; active and issued FLOPs
+remain separate quantities.
+
+The first double-fuzzy 250M run exceeded the 3,600-second development-harness
+timeout at step 5,970/9,296 and has no result or canonical validation. The
+remaining two seeds were not launched. That partial curve, along with every
+short timing gate, is excluded from the 24-run archive and all quality means.
+There is therefore no three-arm 250M claim.
+
+The exact run commits are `fe2bd0f28888103fb473d0d8f70cca144a5488e9`
+(dense), `5d014ccdef84e179f9dc015e0e5f05871800fceb` (fuzzy), and
+`fd1d2542bc9d2735902a963a4eb24233526ac4fc` (double-fuzzy). The canonical
+[three-arm manifest](../../recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json)
+contains every coordinate, seed, schedule, and run ID. A representative run is:
+
+```bash
+git checkout 5d014ccdef84e179f9dc015e0e5f05871800fceb
+uv run --frozen --no-sync rig run fuzzy_topk_autoencoder \
+  --cluster v4-32 --profile dev --tier 60m --context 8k \
+  --batch-size 16 --base-learning-rate 0.00390625 --seed 1337 \
+  --checkpoint-policy none \
+  --name 60m-eqflop-fuzzy-h16d-k4d-l11-s1337 -- \
+  --sparse-top-k 1536
 ```
 
 ## transfer-charts.html

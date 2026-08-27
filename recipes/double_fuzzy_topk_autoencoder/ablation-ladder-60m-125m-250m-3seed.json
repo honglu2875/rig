@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "quality_ladder_queued_after_verified_masked_choicewise_gate",
+  "status": "sealed_with_60m_125m_complete_and_250m_incomplete",
   "study_id": "fuzzy-topk-three-arm-ladder-double-fuzzy-launch-plan",
   "parent_study": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-three-arm-ladder-60m-125m-250m-3seed.json",
@@ -13,7 +13,7 @@
     "input_retained_width": "Q=D/4",
     "hidden_dictionary_width": "H=16D",
     "hidden_retained_width": "K=4D",
-    "input_selector": "one signed maximum from every fixed contiguous four-coordinate group; no inner ReLU or magnitude ranking",
+    "input_selector": "one signed maximum from every fixed contiguous four-coordinate group of the normalized MLP-branch input; no inner ReLU or magnitude ranking; the residual bypass is unchanged",
     "hidden_selector": "one ReLU maximum from every fixed contiguous four-feature group",
     "other_scientific_changes": "none"
   },
@@ -265,6 +265,35 @@
       "resolution": "Use choicewise_composed_masked for all nine quality runs; retain selected-row Pallas as isolated fused-kernel research."
     }
   ],
-  "launch_policy": "The verified masked-choicewise 60m gate passed at 691630.84 tokens/s. Launch the nine quality runs sequentially in tier and seed order; do not silently retry or interpret timing-gate loss.",
+  "execution": {
+    "completed_and_verified": {
+      "60m": {
+        "1337": "20260827T112312.877261Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1337-f8419b9e",
+        "1338": "20260827T113100.882214Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1338-84c0f8e7",
+        "1339": "20260827T113853.543392Z-double_fuzzy_topk_autoencoder-60m-active-eqflop-double-fuzzy-s1339-c3a9031b"
+      },
+      "125m": {
+        "1337": "20260827T114641.595715Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1337-980d28c5",
+        "1338": "20260827T131455.097395Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1338-85083831",
+        "1339": "20260827T133935.506373Z-double_fuzzy_topk_autoencoder-125m-active-eqflop-double-fuzzy-s1339-01dcef01"
+      }
+    },
+    "excluded_250m_seed_1337_attempt": {
+      "run_id": "20260827T140422.396115Z-double_fuzzy_topk_autoencoder-250m-active-eqflop-double-fuzzy-s1337-8ebae840",
+      "status": "interrupted_by_3600_second_harness_timeout",
+      "last_logged_step": 5970,
+      "planned_steps": 9296,
+      "steady_state_tokens_per_second": 228740,
+      "result_json": false,
+      "canonical_validation": false,
+      "archive_policy": "excluded_from_results_and_hugging_face_study"
+    },
+    "not_launched": [
+      "250m_seed_1338",
+      "250m_seed_1339"
+    ],
+    "seal_decision": "The 60M and 125M paired three-seed result already answers the incremental mechanism question consistently; the study is sealed without treating the partial 250M curve as a result."
+  },
+  "launch_policy": "Historical protocol: the verified masked-choicewise 60M gate passed at 691630.84 tokens/s, after which quality runs launched sequentially by tier and seed. The queue stopped for inspection when the first 250M run exceeded the 3600-second harness timeout.",
   "stopping_rule": "After the timing gate passes, run every treatment seed through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
 }

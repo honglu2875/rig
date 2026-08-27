@@ -385,15 +385,18 @@ def _read_ledger(
                 notices.append(f"Ignored non-record records.jsonl line {number}.")
                 continue
             run_id = value["run_id"]
-            if run_id in records or run_id in duplicate_ids:
-                records.pop(run_id, None)
-                if run_id not in duplicate_ids:
+            folder = value.get("folder")
+            identity = folder if isinstance(folder, str) and folder else run_id
+            if identity in records or identity in duplicate_ids:
+                records.pop(identity, None)
+                if identity not in duplicate_ids:
                     notices.append(
-                        f"Duplicate records.jsonl run ID {run_id!r}; that run was excluded."
+                        f"Duplicate records.jsonl run identity {identity!r}; "
+                        "that run was excluded."
                     )
-                duplicate_ids.add(run_id)
+                duplicate_ids.add(identity)
                 continue
-            records[run_id] = value
+            records[identity] = value
     return records, duplicate_ids, notices
 
 
@@ -597,7 +600,13 @@ def _check_identity(
         raise ReportError("result seed is invalid")
     if record is None:
         return
-    if record.get("run_id") != run_id or record.get("status") != "ok":
+    archived_folder = record.get("folder")
+    ledger_identity = (
+        archived_folder
+        if isinstance(archived_folder, str) and archived_folder
+        else record.get("run_id")
+    )
+    if ledger_identity != run_id or record.get("status") != "ok":
         raise ReportError("ledger identity/status does not match the run directory")
     for name in ("track", "profile", "seed"):
         if record.get(name) != result.get(name):
@@ -1700,7 +1709,13 @@ def _study_run_name(
     routed = "-moe" if (metrics.get("experts") or 0) else ""
     model = (result.get("contract") or {}).get("model") or {}
     sparse_mlp = ""
-    if model.get("mlp_activation") == "topk_relu":
+    sparse_activation = model.get("mlp_activation")
+    sparse_labels = {
+        "topk_relu": "sparse",
+        "fuzzy_topk_relu": "fuzzy",
+        "double_fuzzy_topk_relu": "double-fuzzy",
+    }
+    if sparse_activation in sparse_labels:
         hidden_ratio = model.get("mlp_mult")
         top_k = model.get("mlp_top_k")
         model_width = model.get("d_model")
@@ -1720,7 +1735,22 @@ def _study_run_name(
             return ""
         compact_hidden = format(hidden_ratio, ".12g").replace(".", "p")
         compact_active = format(top_k / model_width, ".12g").replace(".", "p")
-        sparse_mlp = f"-sparse-h{compact_hidden}d-k{compact_active}d-l{layers}"
+        input_width = ""
+        if sparse_activation == "double_fuzzy_topk_relu":
+            input_group = model.get("mlp_input_group_size")
+            if (
+                isinstance(input_group, bool)
+                or not isinstance(input_group, int)
+                or input_group <= 0
+                or model_width % input_group
+            ):
+                return ""
+            compact_input = format(1 / input_group, ".12g").replace(".", "p")
+            input_width = f"-q{compact_input}d"
+        sparse_mlp = (
+            f"-{sparse_labels[sparse_activation]}-h{compact_hidden}d"
+            f"{input_width}-k{compact_active}d-l{layers}"
+        )
     duration = (
         "-duration"
         if model.get("parameterization") == "completedp_duration_v1"
