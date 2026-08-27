@@ -814,17 +814,12 @@ def _choicewise_double_fuzzy_topk_mlp(
     had the same nominal FLOPs but substantially worse TPU utilization.
     """
 
-    input_values, input_indices = grouped_signed_max(
-        x, group_size=config.input_group_size
+    input_groups = x.reshape(
+        (*x.shape[:-1], x.shape[-1] // config.input_group_size, config.input_group_size)
     )
-    sparse_input = jnp.zeros_like(x)
-    sparse_input = jnp.put_along_axis(
-        sparse_input,
-        input_indices,
-        input_values,
-        axis=-1,
-        inplace=False,
-    )
+    input_winners = jnp.argmax(input_groups, axis=-1)
+    winner_mask = input_winners[..., None] == jnp.arange(config.input_group_size)
+    sparse_input = jnp.where(winner_mask, input_groups, 0).reshape(x.shape)
     return fuzzy_topk_mlp(
         sparse_input,
         up_weight,
