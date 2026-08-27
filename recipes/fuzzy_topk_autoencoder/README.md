@@ -176,7 +176,7 @@ runs, ordered 125M before 250M and by increasing seed within each tier.
 
 The canonical three-arm contract is
 [`ablation-three-arm-ladder-60m-125m-250m-3seed.json`](ablation-three-arm-ladder-60m-125m-250m-3seed.json).
-It presents the completed dense and fuzzy runs together with the pending
+It presents the completed dense and fuzzy runs together with the queued
 [`double_fuzzy_topk_autoencoder`](../double_fuzzy_topk_autoencoder/) arm as one
 paired-seed research ladder. The implementation recipes remain separate: this
 directory owns fuzzy TopK, while the sibling directory owns doubly-fuzzy TopK.
@@ -201,13 +201,13 @@ coordinate or feature identity.
 |---|---|---:|---:|---:|---:|---|
 | 60M | dense | 59,918,208 | 737,673,984 | 737,673,984 | 2,286 | 3/3 complete, verified |
 | 60M | fuzzy | 97,123,584 | 728,236,800 | 922,878,720 | 2,316 | 3/3 complete, verified |
-| 60M | doubly fuzzy | 117,429,312 | 744,326,016 | 1,057,424,256 | 2,266 | pending composed-choicewise gate |
+| 60M | doubly fuzzy | 117,429,312 | 744,326,016 | 1,057,424,256 | 2,266 | queued, masked-choicewise gate verified |
 | 125M | dense | 123,456,640 | 1,371,014,400 | 1,371,014,400 | 4,709 | 3/3 complete, verified |
 | 125M | fuzzy | 226,753,280 | 1,386,743,040 | 1,927,415,040 | 4,656 | 3/3 complete, verified |
-| 125M | doubly fuzzy | 267,270,784 | 1,376,732,544 | 2,227,209,600 | 4,689 | pending composed-choicewise gate |
+| 125M | doubly fuzzy | 267,270,784 | 1,376,732,544 | 2,227,209,600 | 4,689 | queued, masked-choicewise gate verified |
 | 250M | dense | 244,444,032 | 2,701,133,568 | 2,701,133,568 | 9,325 | 3/3 complete, verified |
 | 250M | fuzzy | 495,053,440 | 2,679,113,472 | 4,027,844,352 | 9,402 | 3/3 complete, verified |
-| 250M | doubly fuzzy | 631,835,648 | 2,709,522,432 | 4,999,612,416 | 9,296 | pending composed-choicewise gate |
+| 250M | doubly fuzzy | 631,835,648 | 2,709,522,432 | 4,999,612,416 | 9,296 | queued, masked-choicewise gate verified |
 
 The primary quality comparison is final validation loss at matched **total
 active** matrix FLOPs. Issued FLOPs, throughput, elapsed time, and stored
