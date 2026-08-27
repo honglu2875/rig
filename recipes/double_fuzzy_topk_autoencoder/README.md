@@ -45,10 +45,13 @@ Tests compare the output and gradients for `x`, `W_up`, `b_up`, `W_down`, and
 
 - `reference` gathers the selected rows for both projections. It is the
   numerical oracle and exposes the irregular-memory baseline.
-- `choicewise` visits the four local alternatives and uses regular masked
-  contractions. It avoids indirect reads but does not skip the masked matrix
-  products.
-- `pallas_up` is the TPU-oriented default. A selected-row Pallas primitive
+- `choicewise` is the TPU-oriented default and the quality-ladder backend. It
+  zero-fills the signed inner winners, then reuses the parent fuzzy recipe's
+  proven choicewise MLP unchanged. Its custom reverse rule issues large regular
+  UP contractions and the established four-choice DOWN path. It avoids the
+  earlier factorized reverse pass's 16 small inner/outer-choice contractions,
+  but it does not skip multiply-adds whose logical input is zero.
+- `pallas_up` is a rejected experimental backend. A selected-row Pallas primitive
   skips the three unselected UP rows per input group in the forward pass. Its
   reverse path and the DOWN path retain bounded choicewise contractions, so
   there is no serialized loop over the large outer `K`. The kernel processes
@@ -93,11 +96,12 @@ The current backend MLP counts are:
 | `reference` custom VJP | `120 M D²` |
 | `choicewise` | `192 M D²` |
 
-The default Pallas hybrid thus physically realizes the 4× UP-forward
-reduction, but not the nominal sparse-gradient and decoder savings. Its
-regular reverse work is intentional: on v4, sufficiently large MXU
-contractions can outrun much smaller graphs dominated by irregular gathers
-and serialized scatters.
+The Pallas hybrid physically realizes the 4× UP-forward reduction, but not the
+nominal sparse-gradient and decoder savings. On v4 its 56-stage input-group
+accumulator measured only 19.60K tokens/s at the 60M gate, versus 966.06K for
+the fuzzy baseline, so it is retained only as fused-kernel research and is not
+used for quality runs. The composed choicewise fallback deliberately issues
+the full regular UP contractions to preserve MXU utilization.
 
 ## Role in the unified three-arm ladder
 
@@ -111,11 +115,11 @@ is the arm-specific launch plan, not a separate research result. It reuses the
 already verified dense controls and preserves `H=16D`, `Q=D/4`, and `K=4D` at
 every point.
 
-| tier | dense `L,D` | treatment `L,D` | active FLOPs/token | steps | total mismatch | issued/dense |
+| tier | dense `L,D` | treatment `L,D` | active FLOPs/token | steps | total mismatch | choicewise issued/dense |
 |---|---:|---:|---:|---:|---:|---:|
-| 60M | `12,384` | `10,448` | 744,326,016 | 2,266 | +0.0190% | 1.356× |
-| 125M | `12,640` | `11,704` | 1,376,732,544 | 4,689 | -0.0094% | 1.523× |
-| 250M | `16,896` | `14,1024` | 2,709,522,432 | 9,296 | -0.0014% | 1.715× |
+| 60M | `12,384` | `10,448` | 744,326,016 | 2,266 | +0.0190% | 1.421× |
+| 125M | `12,640` | `11,704` | 1,376,732,544 | 4,689 | -0.0094% | 1.618× |
+| 250M | `16,896` | `14,1024` | 2,709,522,432 | 9,296 | -0.0014% | 1.845× |
 
 Widths are multiples of the inherited 64-wide attention head. The nearby
 depths stay close to the preceding fuzzy treatment (`11/11/14`); whole-step
@@ -140,13 +144,13 @@ Before the full ladder, run a short v4-32 gate at the smallest treatment
 coordinate:
 
 ```bash
-.venv/bin/rig profile double_fuzzy_topk_autoencoder \
+.venv/bin/rig run double_fuzzy_topk_autoencoder \
   --cluster v4-32 --profile dev --tier 60m --context 8k \
   --batch-size 16 --base-learning-rate 0.00390625 --seed 1350 \
-  --stop-after-step 13 --xprof-start-step 11 --xprof-steps 1 \
-  --output-dir profiles/double-fuzzy-pallas-up-60m -- \
+  --stop-after-step 13 --checkpoint-policy none \
+  --name 60m-preflight-double-fuzzy-composed-choicewise-s1350 -- \
   --sparse-d-model 448 --sparse-layers 10 --sparse-top-k 1792 \
-  --sparse-training-steps 2266
+  --sparse-training-steps 2266 --sparse-mlp-backend choicewise
 ```
 
 The gate must establish compile success, peak-memory headroom, steady-state
@@ -171,7 +175,8 @@ do
       --checkpoint-policy none \
       --name "${tier}-active-eqflop-double-fuzzy-s${seed}" -- \
       --sparse-d-model "$width" --sparse-layers "$layers" \
-      --sparse-top-k "$top_k" --sparse-training-steps "$steps"
+      --sparse-top-k "$top_k" --sparse-training-steps "$steps" \
+      --sparse-mlp-backend choicewise
   done
 done
 ```

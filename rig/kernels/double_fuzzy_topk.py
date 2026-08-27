@@ -27,7 +27,7 @@ from jax.experimental.pallas import tpu as pltpu
 import jax.numpy as jnp
 from jax.sharding import Mesh, PartitionSpec as P
 
-from .fuzzy_topk import fuzzy_topk_relu
+from .fuzzy_topk import FuzzyTopKConfig, fuzzy_topk_mlp, fuzzy_topk_relu
 from .sparse_mlp import pallas_sparse_decode, reference_sparse_decode
 
 
@@ -805,10 +805,33 @@ def _choicewise_double_fuzzy_topk_mlp(
     *,
     config: DoubleFuzzyTopKConfig,
 ) -> jax.Array:
-    """Named all-regular boundary for implementation comparisons."""
+    """Reuse the proven fuzzy kernel after zero-filling inner winners.
 
-    return _make_double_fuzzy_topk(config)(
-        x, up_weight, up_bias, down_weight, down_bias
+    This composition has exactly the two-stage selector semantics but lets the
+    parent fuzzy custom VJP issue large regular UP contractions.  The earlier
+    factorized implementation decomposed the reverse pass across the Cartesian
+    product of four input and four hidden choices; those 16 small contractions
+    had the same nominal FLOPs but substantially worse TPU utilization.
+    """
+
+    input_values, input_indices = grouped_signed_max(
+        x, group_size=config.input_group_size
+    )
+    sparse_input = jnp.zeros_like(x)
+    sparse_input = jnp.put_along_axis(
+        sparse_input,
+        input_indices,
+        input_values,
+        axis=-1,
+        inplace=False,
+    )
+    return fuzzy_topk_mlp(
+        sparse_input,
+        up_weight,
+        up_bias,
+        down_weight,
+        down_bias,
+        config=FuzzyTopKConfig(top_k=config.top_k, backend="choicewise"),
     )
 
 

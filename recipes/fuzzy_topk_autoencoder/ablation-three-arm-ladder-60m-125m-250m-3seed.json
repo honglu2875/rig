@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "dense_and_fuzzy_complete_double_fuzzy_pending_v4_gate_retry",
+  "status": "dense_and_fuzzy_complete_double_fuzzy_pending_composed_choicewise_gate",
   "study_id": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "objective": "Compare dense GELU, fuzzy grouped TopK on the DOWN projection, and doubly-fuzzy grouped TopK on both the UP and DOWN projections over paired three-seed 60M, 125M, and 250M dense-equivalent compute tiers.",
   "primary_comparison": "Final validation loss at matched total active matrix FLOPs within each tier; backend-issued FLOPs, wall time, throughput, and stored parameter count are reported separately and never substituted for the active-compute quality axis.",
@@ -55,7 +55,7 @@
       "inner_selector": "one signed maximum from each fixed exchangeable residual-coordinate group; no inner ReLU or magnitude ranking",
       "outer_selector": "one ReLU winner from each fixed exchangeable feature group",
       "decoder": "feature-specific row for every stored feature",
-      "backend": "pallas_up"
+      "backend": "choicewise"
     }
   },
   "budget": {
@@ -123,7 +123,7 @@
         "hidden_retained_width": 1792,
         "stored_parameters": 117429312,
         "active_flops_per_token": 744326016,
-        "issued_flops_per_token": 1009255296,
+        "issued_flops_per_token": 1057424256,
         "schedule_steps": 2266,
         "planned_tokens": 297009152,
         "cli_overrides": ["--sparse-d-model", "448", "--sparse-layers", "10", "--sparse-top-k", "1792", "--sparse-training-steps", "2266"]
@@ -166,7 +166,7 @@
         "hidden_retained_width": 2816,
         "stored_parameters": 267270784,
         "active_flops_per_token": 1376732544,
-        "issued_flops_per_token": 2096366976,
+        "issued_flops_per_token": 2227209600,
         "schedule_steps": 4689,
         "planned_tokens": 614596608,
         "cli_overrides": ["--sparse-d-model", "704", "--sparse-layers", "11", "--sparse-top-k", "2816", "--sparse-training-steps", "4689"]
@@ -209,7 +209,7 @@
         "hidden_retained_width": 4096,
         "stored_parameters": 631835648,
         "active_flops_per_token": 2709522432,
-        "issued_flops_per_token": 4647290880,
+        "issued_flops_per_token": 4999612416,
         "schedule_steps": 9296,
         "planned_tokens": 1218445312,
         "cli_overrides": ["--sparse-d-model", "1024", "--sparse-layers", "14", "--sparse-top-k", "4096", "--sparse-training-steps", "9296"]
@@ -258,7 +258,7 @@
       }
     },
     "double_fuzzy_topk": {
-      "status": "not_started_pending_v4_timing_gate_retry_after_compile_fix",
+      "status": "not_started_pending_composed_choicewise_gate",
       "runs": {}
     }
   },
