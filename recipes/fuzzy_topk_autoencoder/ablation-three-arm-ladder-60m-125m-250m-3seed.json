@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "dense_and_fuzzy_complete_double_fuzzy_pending_v4_gate",
+  "status": "dense_and_fuzzy_complete_double_fuzzy_pending_v4_gate_retry",
   "study_id": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
   "objective": "Compare dense GELU, fuzzy grouped TopK on the DOWN projection, and doubly-fuzzy grouped TopK on both the UP and DOWN projections over paired three-seed 60M, 125M, and 250M dense-equivalent compute tiers.",
   "primary_comparison": "Final validation loss at matched total active matrix FLOPs within each tier; backend-issued FLOPs, wall time, throughput, and stored parameter count are reported separately and never substituted for the active-compute quality axis.",
@@ -258,7 +258,7 @@
       }
     },
     "double_fuzzy_topk": {
-      "status": "not_started_pending_v4_timing_gate",
+      "status": "not_started_pending_v4_timing_gate_retry_after_compile_fix",
       "runs": {}
     }
   },
