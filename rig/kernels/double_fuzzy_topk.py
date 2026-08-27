@@ -171,6 +171,16 @@ def _grouped_sparse_up_kernel(
     token_count, input_top_k = values_ref.shape
     group_pair = pl.program_id(1)
 
+    # PrefetchScalarGridSpec places the bounded winner/value blocks in SMEM.
+    # TPU Pallas permits only scalar loads from that memory space: a convenient
+    # NumPy column slice such as ``ref[:, group]`` lowers to an illegal vector
+    # SMEM load.  Spell out the static token block so each read remains scalar,
+    # then assemble the values in registers/VMEM for the vector computation.
+    def load_smem_column(ref, column, dtype):
+        return jnp.stack(
+            tuple(ref[token, column] for token in range(token_count))
+        ).astype(dtype)
+
     @pl.when(group_pair == 0)
     def initialize_accumulator() -> None:
         accumulator_ref[...] = jnp.zeros(accumulator_ref.shape, jnp.float32)
@@ -183,9 +193,10 @@ def _grouped_sparse_up_kernel(
         (token_count, TPU_BF16_SUBLANES, selected_tile.shape[1]),
         dimension=1,
     )
-    first_winner = winners_ref[:, first_group].astype(jnp.int32)
+    first_winner = load_smem_column(winners_ref, first_group, jnp.int32)
     second_winner = (
-        winners_ref[:, second_group].astype(jnp.int32) + INPUT_GROUP_SIZE
+        load_smem_column(winners_ref, second_group, jnp.int32)
+        + INPUT_GROUP_SIZE
     )
     first_winner = first_winner[:, None, None]
     second_winner = second_winner[:, None, None]
@@ -198,8 +209,8 @@ def _grouped_sparse_up_kernel(
         jnp.where(row_ids == second_winner, broadcast_tile, 0.0),
         axis=1,
     )
-    first_values = values_ref[:, first_group].astype(jnp.float32)
-    second_values = values_ref[:, second_group].astype(jnp.float32)
+    first_values = load_smem_column(values_ref, first_group, jnp.float32)
+    second_values = load_smem_column(values_ref, second_group, jnp.float32)
     contribution = first_values[:, None] * first_rows
     contribution += second_values[:, None] * second_rows
     accumulator_ref[...] = accumulator_ref[...] + contribution
