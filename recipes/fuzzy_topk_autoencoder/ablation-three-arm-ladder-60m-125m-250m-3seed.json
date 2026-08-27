@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "status": "dense_and_fuzzy_complete_double_fuzzy_pending_v4_gate",
+  "study_id": "fuzzy-topk-three-arm-ladder-60m-125m-250m-3seed",
+  "objective": "Compare dense GELU, fuzzy grouped TopK on the DOWN projection, and doubly-fuzzy grouped TopK on both the UP and DOWN projections over paired three-seed 60M, 125M, and 250M dense-equivalent compute tiers.",
+  "primary_comparison": "Final validation loss at matched total active matrix FLOPs within each tier; backend-issued FLOPs, wall time, throughput, and stored parameter count are reported separately and never substituted for the active-compute quality axis.",
+  "hypotheses": {
+    "fuzzy_vs_dense": "A 16D stored dictionary with one ReLU winner per fixed group of four can outperform a 4D dense GELU MLP at the same total active matrix-FLOP budget.",
+    "double_fuzzy_vs_fuzzy": "Adding a signed one-of-four selector before UP can retain the fuzzy treatment's quality while reducing the active width of both UP and its reverse pass from D to D/4."
+  },
+  "common": {
+    "profile": "dev",
+    "context": "8k",
+    "document_masking": true,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "validation_predictions": 1048576,
+    "batch_size": 16,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "data_order": "paired by tier and seed",
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4
+  },
+  "arm_contracts": {
+    "dense": {
+      "recipe_directory": "recipes/reference",
+      "operation": "DOWN(GELU(UP(x)))",
+      "hidden_width": "H=4D",
+      "active_hidden_width": "K=H=4D",
+      "input_width": "Q=D"
+    },
+    "fuzzy_topk": {
+      "recipe_directory": "recipes/fuzzy_topk_autoencoder",
+      "operation": "DOWN(GROUPED_TOPK_RELU(UP(x)))",
+      "hidden_width": "H=16D",
+      "active_hidden_width": "K=4D",
+      "input_width": "Q=D",
+      "outer_group_size": 4,
+      "outer_selector": "one ReLU winner from each fixed exchangeable feature group",
+      "decoder": "feature-specific row for every stored feature",
+      "backend": "choicewise"
+    },
+    "double_fuzzy_topk": {
+      "recipe_directory": "recipes/double_fuzzy_topk_autoencoder",
+      "operation": "DOWN(GROUPED_TOPK_RELU(UP(GROUPED_SIGNED_MAX(x))))",
+      "hidden_width": "H=16D",
+      "active_hidden_width": "K=4D",
+      "input_width": "Q=D/4",
+      "inner_group_size": 4,
+      "outer_group_size": 4,
+      "inner_selector": "one signed maximum from each fixed exchangeable residual-coordinate group; no inner ReLU or magnitude ranking",
+      "outer_selector": "one ReLU winner from each fixed exchangeable feature group",
+      "decoder": "feature-specific row for every stored feature",
+      "backend": "pallas_up"
+    }
+  },
+  "budget": {
+    "basis": "Within each tier, each arm rounds its explicit whole-step schedule to the dense run's total active matrix-FLOP budget. Per-token active FLOPs may differ because integer width and depth are architectural coordinates.",
+    "physical_accounting": "Issued matrix FLOPs measure the implemented backend. They are reported as systems overhead and do not shorten the active-compute learning horizon.",
+    "tiers": {
+      "60m": {
+        "dense_total_active_flops": 221029692528918528,
+        "fuzzy_total_active_flops": 221065567115673600,
+        "fuzzy_relative_active_mismatch": 0.0001623111686751563,
+        "double_fuzzy_total_active_flops": 221071638823698432,
+        "double_fuzzy_relative_active_mismatch": 0.00018977674130554173
+      },
+      "125m": {
+        "dense_total_active_flops": 846214831747891200,
+        "fuzzy_total_active_flops": 846289383488225280,
+        "fuzzy_relative_active_mismatch": 0.00008810025248563694,
+        "double_fuzzy_total_active_flops": 846135151665610752,
+        "double_fuzzy_relative_active_mismatch": -0.00009416058344842542
+      },
+      "250m": {
+        "dense_total_active_flops": 3301450779407155200,
+        "fuzzy_total_active_flops": 3301575866940653568,
+        "fuzzy_relative_active_mismatch": 0.000037888656186729546,
+        "double_fuzzy_total_active_flops": 3301404905029238784,
+        "double_fuzzy_relative_active_mismatch": -0.000013895217884985009
+      }
+    }
+  },
+  "tiers": {
+    "60m": {
+      "dense": {
+        "layers": 12,
+        "d_model": 384,
+        "heads": 6,
+        "dictionary_width": 1536,
+        "input_retained_width": 384,
+        "hidden_retained_width": 1536,
+        "stored_parameters": 59918208,
+        "active_flops_per_token": 737673984,
+        "issued_flops_per_token": 737673984,
+        "schedule_steps": 2286,
+        "planned_tokens": 299630592
+      },
+      "fuzzy_topk": {
+        "layers": 11,
+        "d_model": 384,
+        "heads": 6,
+        "dictionary_width": 6144,
+        "input_retained_width": 384,
+        "hidden_retained_width": 1536,
+        "stored_parameters": 97123584,
+        "active_flops_per_token": 728236800,
+        "issued_flops_per_token": 922878720,
+        "schedule_steps": 2316,
+        "planned_tokens": 303562752,
+        "cli_overrides": ["--sparse-top-k", "1536"]
+      },
+      "double_fuzzy_topk": {
+        "layers": 10,
+        "d_model": 448,
+        "heads": 7,
+        "dictionary_width": 7168,
+        "input_retained_width": 112,
+        "hidden_retained_width": 1792,
+        "stored_parameters": 117429312,
+        "active_flops_per_token": 744326016,
+        "issued_flops_per_token": 1009255296,
+        "schedule_steps": 2266,
+        "planned_tokens": 297009152,
+        "cli_overrides": ["--sparse-d-model", "448", "--sparse-layers", "10", "--sparse-top-k", "1792", "--sparse-training-steps", "2266"]
+      }
+    },
+    "125m": {
+      "dense": {
+        "layers": 12,
+        "d_model": 640,
+        "heads": 10,
+        "dictionary_width": 2560,
+        "input_retained_width": 640,
+        "hidden_retained_width": 2560,
+        "stored_parameters": 123456640,
+        "active_flops_per_token": 1371014400,
+        "issued_flops_per_token": 1371014400,
+        "schedule_steps": 4709,
+        "planned_tokens": 617218048
+      },
+      "fuzzy_topk": {
+        "layers": 11,
+        "d_model": 640,
+        "heads": 10,
+        "dictionary_width": 10240,
+        "input_retained_width": 640,
+        "hidden_retained_width": 2560,
+        "stored_parameters": 226753280,
+        "active_flops_per_token": 1386743040,
+        "issued_flops_per_token": 1927415040,
+        "schedule_steps": 4656,
+        "planned_tokens": 610271232,
+        "cli_overrides": ["--sparse-top-k", "2560"]
+      },
+      "double_fuzzy_topk": {
+        "layers": 11,
+        "d_model": 704,
+        "heads": 11,
+        "dictionary_width": 11264,
+        "input_retained_width": 176,
+        "hidden_retained_width": 2816,
+        "stored_parameters": 267270784,
+        "active_flops_per_token": 1376732544,
+        "issued_flops_per_token": 2096366976,
+        "schedule_steps": 4689,
+        "planned_tokens": 614596608,
+        "cli_overrides": ["--sparse-d-model", "704", "--sparse-layers", "11", "--sparse-top-k", "2816", "--sparse-training-steps", "4689"]
+      }
+    },
+    "250m": {
+      "dense": {
+        "layers": 16,
+        "d_model": 896,
+        "heads": 14,
+        "dictionary_width": 3584,
+        "input_retained_width": 896,
+        "hidden_retained_width": 3584,
+        "stored_parameters": 244444032,
+        "active_flops_per_token": 2701133568,
+        "issued_flops_per_token": 2701133568,
+        "schedule_steps": 9325,
+        "planned_tokens": 1222246400
+      },
+      "fuzzy_topk": {
+        "layers": 14,
+        "d_model": 896,
+        "heads": 14,
+        "dictionary_width": 14336,
+        "input_retained_width": 896,
+        "hidden_retained_width": 3584,
+        "stored_parameters": 495053440,
+        "active_flops_per_token": 2679113472,
+        "issued_flops_per_token": 4027844352,
+        "schedule_steps": 9402,
+        "planned_tokens": 1232338944,
+        "cli_overrides": ["--sparse-top-k", "3584"]
+      },
+      "double_fuzzy_topk": {
+        "layers": 14,
+        "d_model": 1024,
+        "heads": 16,
+        "dictionary_width": 16384,
+        "input_retained_width": 256,
+        "hidden_retained_width": 4096,
+        "stored_parameters": 631835648,
+        "active_flops_per_token": 2709522432,
+        "issued_flops_per_token": 4647290880,
+        "schedule_steps": 9296,
+        "planned_tokens": 1218445312,
+        "cli_overrides": ["--sparse-d-model", "1024", "--sparse-layers", "14", "--sparse-top-k", "4096", "--sparse-training-steps", "9296"]
+      }
+    }
+  },
+  "execution": {
+    "dense": {
+      "status": "complete_and_verified",
+      "runs": {
+        "60m": {
+          "1337": "20260825T183817.778630Z-reference-gmax-ladder-60m-dense-s1337-38ef1d69",
+          "1338": "20260825T184918.694649Z-reference-gmax-ladder-60m-dense-s1338-9656b987",
+          "1339": "20260825T190013.034910Z-reference-gmax-ladder-60m-dense-s1339-4171ed72"
+        },
+        "125m": {
+          "1337": "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+          "1338": "20260825T194108.904905Z-reference-gmax-ladder-125m-dense-s1338-318eab6f",
+          "1339": "20260825T201107.229311Z-reference-gmax-ladder-125m-dense-s1339-32ad584a"
+        },
+        "250m": {
+          "1337": "20260825T204101.730861Z-reference-gmax-ladder-250m-dense-s1337-8ad47e4d",
+          "1338": "20260825T222152.930087Z-reference-gmax-ladder-250m-dense-s1338-dba22a67",
+          "1339": "20260826T000242.547386Z-reference-gmax-ladder-250m-dense-s1339-e896b3ee"
+        }
+      }
+    },
+    "fuzzy_topk": {
+      "status": "complete_and_verified",
+      "runs": {
+        "60m": {
+          "1337": "20260826T232326.439150Z-fuzzy_topk_autoencoder-60m-eqflop-fuzzy-h16d-k4d-l11-s1337-919f9bb3",
+          "1338": "20260826T233013.857928Z-fuzzy_topk_autoencoder-60m-eqflop-fuzzy-h16d-k4d-l11-s1338-be8d2745",
+          "1339": "20260826T233658.106956Z-fuzzy_topk_autoencoder-60m-eqflop-fuzzy-h16d-k4d-l11-s1339-1cc4d44b"
+        },
+        "125m": {
+          "1337": "20260826T234521.079165Z-fuzzy_topk_autoencoder-125m-eqflop-fuzzy-h16d-k4d-l11-s1337-448ddd25",
+          "1338": "20260827T000529.684093Z-fuzzy_topk_autoencoder-125m-eqflop-fuzzy-h16d-k4d-l11-s1338-33341cf5",
+          "1339": "20260827T002546.625438Z-fuzzy_topk_autoencoder-125m-eqflop-fuzzy-h16d-k4d-l11-s1339-e8ea28db"
+        },
+        "250m": {
+          "1337": "20260827T004545.630615Z-fuzzy_topk_autoencoder-250m-eqflop-fuzzy-h16d-k4d-l14-s1337-ca8794b0",
+          "1338": "20260827T020109.141421Z-fuzzy_topk_autoencoder-250m-eqflop-fuzzy-h16d-k4d-l14-s1338-edcfcd05",
+          "1339": "20260827T031621.239821Z-fuzzy_topk_autoencoder-250m-eqflop-fuzzy-h16d-k4d-l14-s1339-d1b1c184"
+        }
+      }
+    },
+    "double_fuzzy_topk": {
+      "status": "not_started_pending_v4_timing_gate",
+      "runs": {}
+    }
+  },
+  "provenance": {
+    "completed_fuzzy_phase_manifests": [
+      "recipes/fuzzy_topk_autoencoder/ablation-60m-3seed.json",
+      "recipes/fuzzy_topk_autoencoder/ablation-ladder-125m-250m-3seed.json"
+    ],
+    "double_fuzzy_launch_manifest": "recipes/double_fuzzy_topk_autoencoder/ablation-ladder-60m-125m-250m-3seed.json",
+    "artifact_verification": "All 18 dense and fuzzy run directories passed rig verify on 2026-08-27."
+  },
+  "launch_policy": "Before the nine doubly-fuzzy quality runs, run the documented 60M one-seed v4-32 compile/timing/memory gate. If it passes, launch tiers sequentially in 60M, 125M, 250M order and seeds 1337, 1338, 1339 within each tier.",
+  "stopping_rule": "Run every quality cell through its complete explicit cosine schedule; do not stop or retry based on intermediate loss. A systems failure stops the sequential queue for inspection."
+}
