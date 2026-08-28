@@ -39,8 +39,8 @@ from jax.experimental import multihost_utils
 import yaml
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 
-from rig import logpack
-from rig.arguments import positive_int
+from rig import logpack, vectorlog
+from rig.arguments import nonnegative_int, positive_int
 from rig.attention import (
     AttentionCallable,
     AttentionRuntime,
@@ -155,11 +155,14 @@ from rig.flops import (
 )
 from rig.kernels import (
     AttentionConfig,
+    FUZZY_FEATURE_STAT_NAMES,
     FuzzyTopKCallable,
     FuzzyTopKConfig,
+    FuzzyTopKDiagnosticCallable,
     fuzzy_topk_mlp,
     make_causal_attention,
     make_mesh_fuzzy_topk_mlp,
+    make_mesh_fuzzy_topk_mlp_with_diagnostics,
     select_attention_tiles,
     tiled_tied_cross_entropy,
     tiled_tied_cross_entropy_losses,
@@ -173,6 +176,8 @@ _VALID_PROFILES = ("smoke", "dev", "official")
 _DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _TIER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _CONTEXT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+FUZZY_SPARSITY_LOG_NAME = f"fuzzy_sparsity{vectorlog.SUFFIX}"
+_FUZZY_SPARSITY_TEMP_NAME = f".{FUZZY_SPARSITY_LOG_NAME}.tmp"
 
 
 # A deliberately small, original corpus for offline and smoke-test use.  The
@@ -220,6 +225,7 @@ class Config:
     val_every: int
     val_probe_batches: int
     diagnostics_every: int
+    sparsity_diagnostics_every: int
     log_every: int
     vocab_size: int
     semantic_vocab_size: int
@@ -485,6 +491,7 @@ class EvaluationSettings:
 @dataclass(frozen=True, slots=True)
 class LoggingSettings:
     diagnostics_every: NonnegativeInt
+    sparsity_diagnostics_every: NonnegativeInt
     log_every: PositiveInt
 
 
@@ -708,6 +715,15 @@ def build_parser() -> argparse.ArgumentParser:
             "mutually exclusive with --tokens-per-parameter"
         ),
     )
+    sparse.add_argument(
+        "--sparsity-diagnostics-every",
+        type=nonnegative_int,
+        default=None,
+        help=(
+            "override the per-feature diagnostic cadence; zero disables it "
+            "without changing the training computation"
+        ),
+    )
     add_standard_reporting_arguments(optim)
     return parser
 
@@ -748,6 +764,14 @@ def should_compile_evaluation(
     """Return whether this invocation can execute any validation workload."""
 
     return not args.diagnostic_mode or config.val_every > 0 or bool(downstream_domains)
+
+
+def should_run_sparsity_diagnostics(
+    step: int, *, every: int, final_step: int
+) -> bool:
+    """Capture the first batch, fixed cadence, and exact final batch."""
+
+    return every > 0 and (step == 1 or step % every == 0 or step == final_step)
 
 
 def selected_profile(args: argparse.Namespace) -> str:
@@ -872,6 +896,14 @@ def resolve_config(
     )
     log_every = steps if args.diagnostic_mode else logging.log_every
     diagnostics_every = 0 if args.diagnostic_mode else logging.diagnostics_every
+    configured_sparsity_cadence = (
+        logging.sparsity_diagnostics_every
+        if args.sparsity_diagnostics_every is None
+        else args.sparsity_diagnostics_every
+    )
+    sparsity_diagnostics_every = (
+        0 if args.diagnostic_mode else configured_sparsity_cadence
+    )
 
     dtype_name = training.dtype
     compute_dtype = jnp.bfloat16 if dtype_name == "bfloat16" else jnp.float32
@@ -953,6 +985,7 @@ def resolve_config(
         val_every=val_every,
         val_probe_batches=val_probe_batches,
         diagnostics_every=diagnostics_every,
+        sparsity_diagnostics_every=sparsity_diagnostics_every,
         log_every=log_every,
         vocab_size=model.vocab_size,
         semantic_vocab_size=model.semantic_vocab_size,
@@ -1107,6 +1140,7 @@ def experiment_config_metadata(config: Config) -> dict[str, Any]:
             },
             "logging": {
                 "diagnostics_every": config.diagnostics_every,
+                "sparsity_diagnostics_every": config.sparsity_diagnostics_every,
                 "log_every": config.log_every,
             },
         },
@@ -1212,9 +1246,12 @@ def gpt_hidden(
     config: Config,
     attention_fn: AttentionCallable | None = None,
     sparse_mlp_fn: FuzzyTopKCallable | None = None,
-) -> jax.Array:
+    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable | None = None,
+) -> jax.Array | tuple[jax.Array, jax.Array]:
     """Return final normalized token representations before the tied head."""
 
+    if sparse_mlp_fn is not None and sparse_mlp_diagnostic_fn is not None:
+        raise ValueError("ordinary and diagnostic sparse MLP callables are exclusive")
     dtype = config.compute_dtype
     batch, length = tokens.shape
     del batch
@@ -1247,6 +1284,7 @@ def gpt_hidden(
         top_k=config.mlp_top_k,
         backend=config.sparse_mlp_backend,
     )
+    feature_statistics: list[jax.Array] = []
 
     for block in params["blocks"]:
         residual = x
@@ -1292,14 +1330,21 @@ def gpt_hidden(
             block["mlp_down_w"],
             block["mlp_down_b"],
         )
-        mlp_output = (
-            sparse_mlp_fn(*mlp_arguments)
-            if sparse_mlp_fn is not None
-            else fuzzy_topk_mlp(*mlp_arguments, config=sparse_mlp_config)
-        )
+        if sparse_mlp_diagnostic_fn is not None:
+            mlp_output, layer_statistics = sparse_mlp_diagnostic_fn(*mlp_arguments)
+            feature_statistics.append(layer_statistics)
+        else:
+            mlp_output = (
+                sparse_mlp_fn(*mlp_arguments)
+                if sparse_mlp_fn is not None
+                else fuzzy_topk_mlp(*mlp_arguments, config=sparse_mlp_config)
+            )
         x = residual + (config.depth_multiplier ** (-config.depth_alpha)) * (mlp_output)
 
-    return rms_norm(x, params["final_ln_scale"], dtype)
+    hidden = rms_norm(x, params["final_ln_scale"], dtype)
+    if sparse_mlp_diagnostic_fn is not None:
+        return hidden, jnp.stack(feature_statistics, axis=1)
+    return hidden
 
 
 def gpt_logits(
@@ -1342,6 +1387,45 @@ def cross_entropy(
     log_probabilities = jax.nn.log_softmax(logits, axis=-1)
     selected = jnp.take_along_axis(log_probabilities, y[..., None], axis=-1)
     return -jnp.mean(selected, dtype=jnp.float32)
+
+
+def cross_entropy_with_sparsity_diagnostics(
+    params: Mapping[str, Any],
+    x: jax.Array,
+    y: jax.Array,
+    config: Config,
+    attention_fn: AttentionCallable | None,
+    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable,
+) -> tuple[jax.Array, jax.Array]:
+    """Return the ordinary objective plus stop-gradient fuzzy feature vectors."""
+
+    hidden, statistics = gpt_hidden(
+        params,
+        x,
+        config,
+        attention_fn,
+        sparse_mlp_diagnostic_fn=sparse_mlp_diagnostic_fn,
+    )
+    output_embedding = params.get("output_embedding", params["token_embedding"])
+    if config.loss_backend == "tiled":
+        loss = tiled_tied_cross_entropy(
+            hidden,
+            output_embedding,
+            y,
+            semantic_vocab_size=config.semantic_vocab_size,
+            vocab_tile_size=config.vocab_tile_size,
+            compute_dtype=config.compute_dtype,
+        )
+    else:
+        logits = jnp.einsum(
+            "btd,vd->btv",
+            hidden,
+            output_embedding.astype(config.compute_dtype),
+        ).astype(jnp.float32)[..., : config.semantic_vocab_size]
+        log_probabilities = jax.nn.log_softmax(logits, axis=-1)
+        selected = jnp.take_along_axis(log_probabilities, y[..., None], axis=-1)
+        loss = -jnp.mean(selected, dtype=jnp.float32)
+    return loss, statistics
 
 
 def learning_rate(step: jax.Array, config: Config) -> jax.Array:
@@ -1496,7 +1580,8 @@ def _apply_training_update(
     decay_mask: Any | None = None,
     attention_fn: AttentionCallable | None = None,
     sparse_mlp_fn: FuzzyTopKCallable | None = None,
-) -> tuple[Any, dict[str, Any], dict[str, jax.Array], Any]:
+    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable | None = None,
+) -> tuple[Any, dict[str, Any], dict[str, jax.Array], Any, jax.Array | None]:
     """Apply one ordinary update and also return the raw, pre-clip gradient.
 
     Both the ordinary and sparse-diagnostic executables use this exact function.
@@ -1509,11 +1594,27 @@ def _apply_training_update(
         optimizer_hyperparameter_trees(params, config)
     )
     beta1, beta2 = effective_adam_betas(config)
-    loss, gradients = jax.value_and_grad(
-        lambda candidate: cross_entropy(
-            candidate, x, y, config, attention_fn, sparse_mlp_fn
-        )
-    )(params)
+    if sparse_mlp_diagnostic_fn is None:
+        loss, gradients = jax.value_and_grad(
+            lambda candidate: cross_entropy(
+                candidate, x, y, config, attention_fn, sparse_mlp_fn
+            )
+        )(params)
+        sparsity_statistics = None
+    else:
+        if sparse_mlp_fn is not None:
+            raise ValueError("ordinary and diagnostic sparse MLP callables are exclusive")
+        (loss, sparsity_statistics), gradients = jax.value_and_grad(
+            lambda candidate: cross_entropy_with_sparsity_diagnostics(
+                candidate,
+                x,
+                y,
+                config,
+                attention_fn,
+                sparse_mlp_diagnostic_fn,
+            ),
+            has_aux=True,
+        )(params)
     gradients = jax.tree_util.tree_map(lambda grad: grad.astype(jnp.float32), gradients)
     raw_gradients = gradients
     squared_norms = [
@@ -1585,6 +1686,7 @@ def _apply_training_update(
             "learning_rate": lr,
         },
         raw_gradients,
+        sparsity_statistics,
     )
 
 
@@ -1598,7 +1700,7 @@ def train_step(
     attention_fn: AttentionCallable | None = None,
     sparse_mlp_fn: FuzzyTopKCallable | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, jax.Array]]:
-    params, optimizer, metrics, _ = _apply_training_update(
+    params, optimizer, metrics, _, _ = _apply_training_update(
         params,
         optimizer,
         x,
@@ -1624,7 +1726,7 @@ def diagnostic_train_step(
     """Run the same update as :func:`train_step` and emit sparse statistics."""
 
     params_before = params
-    params, optimizer, metrics, raw_gradients = _apply_training_update(
+    params, optimizer, metrics, raw_gradients, _ = _apply_training_update(
         params,
         optimizer,
         x,
@@ -1636,6 +1738,37 @@ def diagnostic_train_step(
     )
     values = diagnostic_values(params_before, raw_gradients, params)
     return params, optimizer, metrics, values
+
+
+def sparsity_diagnostic_train_step(
+    params: Any,
+    optimizer: Mapping[str, Any],
+    x: jax.Array,
+    y: jax.Array,
+    config: Config,
+    decay_mask: Any | None,
+    attention_fn: AttentionCallable | None,
+    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable,
+) -> tuple[Any, dict[str, Any], dict[str, jax.Array], jax.Array, jax.Array]:
+    """Apply the ordinary update and emit model plus fuzzy feature diagnostics."""
+
+    params_before = params
+    params, optimizer, metrics, raw_gradients, feature_statistics = (
+        _apply_training_update(
+            params,
+            optimizer,
+            x,
+            y,
+            config,
+            decay_mask,
+            attention_fn,
+            sparse_mlp_diagnostic_fn=sparse_mlp_diagnostic_fn,
+        )
+    )
+    if feature_statistics is None:  # pragma: no cover - callable guarantees aux
+        raise AssertionError("sparsity diagnostic update returned no feature statistics")
+    model_statistics = diagnostic_values(params_before, raw_gradients, params)
+    return params, optimizer, metrics, model_statistics, feature_statistics
 
 
 def eval_step(
@@ -1916,6 +2049,14 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     else None
                 ),
             ),
+            (
+                "fuzzy sparsity diagnostics",
+                (
+                    f"step 1, every {config.sparsity_diagnostics_every:,}, and final"
+                    if config.sparsity_diagnostics_every
+                    else "disabled"
+                ),
+            ),
         ),
     )
 
@@ -1937,6 +2078,17 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             backend=config.sparse_mlp_backend,
         ),
         mesh=mesh,
+    )
+    sparse_mlp_diagnostic_fn = (
+        make_mesh_fuzzy_topk_mlp_with_diagnostics(
+            config=FuzzyTopKConfig(
+                top_k=config.mlp_top_k,
+                backend=config.sparse_mlp_backend,
+            ),
+            mesh=mesh,
+        )
+        if config.sparsity_diagnostics_every
+        else None
     )
     params = put_replicated_tree(host_params, mesh, replicated, process_count)
     optimizer = put_replicated_tree(host_optimizer, mesh, replicated, process_count)
@@ -2000,6 +2152,38 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         )
         diagnostic_compile_seconds = time.perf_counter() - diagnostic_compile_started
 
+    sparsity_diagnostic_executable: Any | None = None
+    sparsity_diagnostic_compile_seconds = 0.0
+    if config.sparsity_diagnostics_every:
+        if sparse_mlp_diagnostic_fn is None:  # defensive construction invariant
+            raise AssertionError("sparsity diagnostics have no sparse MLP callable")
+        console.phase(
+            "Compiling fuzzy sparsity diagnostics",
+            "feature reductions are fused into the four-choice MLP passes",
+        )
+        sparsity_compile_started = time.perf_counter()
+        sparsity_diagnostic_executable = (
+            jax.jit(
+                lambda p, o, x, y: sparsity_diagnostic_train_step(
+                    p,
+                    o,
+                    x,
+                    y,
+                    config,
+                    decay_mask,
+                    attention_fn,
+                    sparse_mlp_diagnostic_fn,
+                ),
+                in_shardings=(replicated, replicated, data_sharding, data_sharding),
+                donate_argnums=(0, 1),
+            )
+            .lower(params, optimizer, sample_x, sample_y)
+            .compile()
+        )
+        sparsity_diagnostic_compile_seconds = (
+            time.perf_counter() - sparsity_compile_started
+        )
+
     # Compile evaluation exactly once when it is requested. Diagnostic XProf
     # runs can skip this executable entirely, keeping their setup focused on the
     # training step being inspected.
@@ -2035,7 +2219,10 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         )
         eval_compile_seconds = time.perf_counter() - eval_compile_started
     total_compile_seconds = (
-        train_compile_seconds + diagnostic_compile_seconds + eval_compile_seconds
+        train_compile_seconds
+        + diagnostic_compile_seconds
+        + sparsity_diagnostic_compile_seconds
+        + eval_compile_seconds
     )
 
     sync_tree((params, optimizer, sample_x, sample_y, sample_mask))
@@ -2074,17 +2261,32 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
     output_dir = args.output_dir.expanduser().resolve()
     progress_log: logpack.LogWriter | None = None
     diagnostic_log: logpack.LogWriter | None = None
+    sparsity_log: vectorlog.VectorLogWriter | None = None
+    sparsity_point_count = 0
     if is_controller:
         output_dir.mkdir(parents=True, exist_ok=True)
         # A stale file from a reused directory would be appended to.
         (output_dir / TRAINING_LOG_NAME).unlink(missing_ok=True)
         (output_dir / DIAGNOSTICS_LOG_NAME).unlink(missing_ok=True)
+        (output_dir / FUZZY_SPARSITY_LOG_NAME).unlink(missing_ok=True)
+        (output_dir / _FUZZY_SPARSITY_TEMP_NAME).unlink(missing_ok=True)
         progress_log = open_log(
             output_dir / TRAINING_LOG_NAME,
             training_log_columns(),
             tokens_per_step=config.batch_size * config.seq_len,
             flops_per_token=flops_per_token,
         )
+        if config.sparsity_diagnostics_every:
+            hidden_width = config.mlp_mult * config.d_model
+            sparsity_log = vectorlog.VectorLogWriter(
+                output_dir / _FUZZY_SPARSITY_TEMP_NAME,
+                FUZZY_FEATURE_STAT_NAMES,
+                layer_count=config.layers,
+                feature_count=hidden_width,
+                group_size=hidden_width // config.mlp_top_k,
+                tokens_per_step=config.batch_size * config.seq_len,
+                flops_per_token=flops_per_token,
+            )
         diagnostic_log = open_log(
             output_dir / DIAGNOSTICS_LOG_NAME,
             diagnostic_log_columns(diagnostic_metadata),
@@ -2146,7 +2348,37 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                 batch_y = put_host_local_array(
                     batch_y, mesh, P("data", None), data_sharding, process_count
                 )
-                if should_run_diagnostics(
+                diagnostic_values_at_step: jax.Array | None = None
+                if should_run_sparsity_diagnostics(
+                    step_index,
+                    every=config.sparsity_diagnostics_every,
+                    final_step=config.final_step,
+                ):
+                    if sparsity_diagnostic_executable is None:
+                        raise AssertionError(
+                            "sparsity diagnostic executable was not compiled"
+                        )
+                    (
+                        params,
+                        optimizer,
+                        last_metrics,
+                        diagnostic_values_at_step,
+                        feature_statistics_at_step,
+                    ) = sparsity_diagnostic_executable(
+                        params, optimizer, batch_x, batch_y
+                    )
+                    if is_controller:
+                        if sparsity_log is None:
+                            raise AssertionError("sparsity vector log was not opened")
+                        sparsity_log.append(
+                            step_index,
+                            np.asarray(
+                                local_device_get(feature_statistics_at_step),
+                                dtype=np.float32,
+                            ),
+                        )
+                        sparsity_point_count += 1
+                elif should_run_diagnostics(
                     step_index,
                     every=config.diagnostics_every,
                     final_step=config.final_step,
@@ -2156,6 +2388,12 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     params, optimizer, last_metrics, diagnostic_values_at_step = (
                         diagnostic_executable(params, optimizer, batch_x, batch_y)
                     )
+                else:
+                    params, optimizer, last_metrics = executable(
+                        params, optimizer, batch_x, batch_y
+                    )
+
+                if diagnostic_values_at_step is not None:
                     diagnostic_device_points.append(
                         (step_index, diagnostic_values_at_step)
                     )
@@ -2177,10 +2415,6 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                                 point.step,
                                 np.asarray(point.values, dtype=np.float32).reshape(-1),
                             )
-                else:
-                    params, optimizer, last_metrics = executable(
-                        params, optimizer, batch_x, batch_y
-                    )
                 if should_run_validation_probe(
                     step_index,
                     every=config.val_every,
@@ -2274,6 +2508,8 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         # a salvage append can never land after the authoritative artifact.
         close_log(progress_log)
         close_log(diagnostic_log)
+        if sparsity_log is not None:
+            sparsity_log.close()
 
     if last_metrics is None:  # defensive: argparse prevents zero steps
         raise AssertionError("training produced no metrics")
@@ -2301,6 +2537,24 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             ),
         ]
     )
+    sparsity_recorded = False
+    if is_controller and config.sparsity_diagnostics_every:
+        # Keep the growing multi-hundred-MB log under the harness's excluded
+        # dotted-temp convention. Otherwise its once-a-minute salvage rsync
+        # repeatedly scans and transfers a file that is only authoritative for
+        # completed runs. One atomic rename exposes it for the final pull.
+        (output_dir / _FUZZY_SPARSITY_TEMP_NAME).replace(
+            output_dir / FUZZY_SPARSITY_LOG_NAME
+        )
+        captured = vectorlog.read_vector_log(output_dir / FUZZY_SPARSITY_LOG_NAME)
+        if (
+            len(captured) != sparsity_point_count
+            or len(captured) == 0
+            or int(captured.steps[0]) != 1
+            or int(captured.steps[-1]) != config.final_step
+        ):
+            raise ValueError("fuzzy sparsity log does not cover its capture schedule")
+        sparsity_recorded = True
     train_loss = finite_metric("train_loss", float(final_train["loss"]))
 
     if diagnostic_mode:
@@ -2403,6 +2657,8 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
     artifact_names = [TRAINING_LOG_NAME, VALIDATION_CSV_NAME]
     if diagnostic_points:
         artifact_names.append(DIAGNOSTICS_LOG_NAME)
+    if sparsity_recorded:
+        artifact_names.append(FUZZY_SPARSITY_LOG_NAME)
     if not args.omit_checkpoint:
         artifact_names.append(CHECKPOINT_NAME)
     console.phase("Artifacts", " + ".join(artifact_names))
@@ -2456,6 +2712,11 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             "training_curve": TRAINING_LOG_NAME,
             "validation_curve": VALIDATION_CSV_NAME,
             **({"diagnostics": DIAGNOSTICS_LOG_NAME} if diagnostic_points else {}),
+            **(
+                {"fuzzy_sparsity": FUZZY_SPARSITY_LOG_NAME}
+                if sparsity_recorded
+                else {}
+            ),
         },
         "system": {
             **system_metadata(devices),
@@ -2527,6 +2788,8 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             ),
             "diagnostic_point_count": len(diagnostic_points),
             "diagnostics_every": int(config.diagnostics_every),
+            "sparsity_diagnostic_point_count": int(sparsity_point_count),
+            "sparsity_diagnostics_every": int(config.sparsity_diagnostics_every),
             "validation_probe_seconds": finite_metric(
                 "validation_probe_seconds", validation_probe_seconds
             ),
@@ -2565,6 +2828,10 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             ),
             "diagnostic_compile_seconds": finite_metric(
                 "diagnostic_compile_seconds", diagnostic_compile_seconds
+            ),
+            "sparsity_diagnostic_compile_seconds": finite_metric(
+                "sparsity_diagnostic_compile_seconds",
+                sparsity_diagnostic_compile_seconds,
             ),
             "total_compile_seconds": finite_metric(
                 "total_compile_seconds", total_compile_seconds

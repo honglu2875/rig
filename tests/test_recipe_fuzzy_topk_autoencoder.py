@@ -10,6 +10,15 @@ import unittest
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
+import jax  # noqa: E402
+import jax.numpy as jnp  # noqa: E402
+import numpy as np  # noqa: E402
+
+from rig.kernels import (  # noqa: E402
+    FUZZY_FEATURE_STAT_NAMES,
+    FuzzyTopKConfig,
+    fuzzy_topk_mlp_with_diagnostics,
+)
 from rig.plan import validate_recipe_plan  # noqa: E402
 
 
@@ -56,6 +65,93 @@ class FuzzyTopKRecipeTests(unittest.TestCase):
         )
         self.assertEqual(target.mlp_top_k, 4 * target.d_model)
         self.assertEqual(target.mlp_mult * target.d_model // target.mlp_top_k, 4)
+        self.assertEqual(target.sparsity_diagnostics_every, 100)
+
+    def test_feature_diagnostic_cadence_can_be_disabled_for_the_speed_control(
+        self,
+    ) -> None:
+        control = resolved(
+            "dev",
+            "--tier",
+            "60m",
+            "--sparsity-diagnostics-every",
+            "0",
+        )
+        treatment = resolved(
+            "dev",
+            "--tier",
+            "60m",
+            "--sparsity-diagnostics-every",
+            "10",
+        )
+        self.assertEqual(control.sparsity_diagnostics_every, 0)
+        self.assertEqual(treatment.sparsity_diagnostics_every, 10)
+        self.assertEqual(
+            [
+                step
+                for step in range(1, 206)
+                if trainer.should_run_sparsity_diagnostics(
+                    step, every=100, final_step=205
+                )
+            ],
+            [1, 100, 200, 205],
+        )
+
+    def test_feature_diagnostic_step_is_the_same_optimizer_update(self) -> None:
+        config = resolved("smoke")
+        params = trainer.init_params(config, 3)
+        optimizer = jax.tree_util.tree_map(
+            jnp.asarray, trainer.init_optimizer(params, config.steps)
+        )
+        decay_mask = trainer.weight_decay_mask(params)
+        tokens = jnp.arange(config.batch_size * config.seq_len, dtype=jnp.int32)
+        tokens = tokens.reshape((config.batch_size, config.seq_len))
+        x = tokens % config.semantic_vocab_size
+        y = (tokens + 1) % config.semantic_vocab_size
+
+        ordinary = trainer.diagnostic_train_step(
+            params, optimizer, x, y, config, decay_mask
+        )
+
+        kernel_config = FuzzyTopKConfig(
+            top_k=config.mlp_top_k,
+            backend=config.sparse_mlp_backend,
+        )
+
+        def diagnostic_mlp(*operands):
+            return fuzzy_topk_mlp_with_diagnostics(
+                *operands, config=kernel_config
+            )
+
+        instrumented = trainer.sparsity_diagnostic_train_step(
+            params,
+            optimizer,
+            x,
+            y,
+            config,
+            decay_mask,
+            None,
+            diagnostic_mlp,
+        )
+
+        for actual_tree, expected_tree in zip(
+            instrumented[:4], ordinary, strict=True
+        ):
+            for actual, expected in zip(
+                jax.tree_util.tree_leaves(actual_tree),
+                jax.tree_util.tree_leaves(expected_tree),
+                strict=True,
+            ):
+                np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
+        feature_statistics = instrumented[4]
+        self.assertEqual(
+            feature_statistics.shape,
+            (
+                len(FUZZY_FEATURE_STAT_NAMES),
+                config.layers,
+                config.mlp_mult * config.d_model,
+            ),
+        )
 
     def test_recipe_local_overrides_preserve_integral_groups(self) -> None:
         config = resolved(

@@ -112,4 +112,5 @@ run:
     probe: null
   logging:
     diagnostics_every: 10
+    sparsity_diagnostics_every: 100
     log_every: 10

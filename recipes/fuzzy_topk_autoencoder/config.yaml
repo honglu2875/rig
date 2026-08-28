@@ -119,4 +119,5 @@ run:
       predictions: 1048576
   logging:
     diagnostics_every: 500
+    sparsity_diagnostics_every: 500
     log_every: 500

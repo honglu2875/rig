@@ -14,10 +14,13 @@ import numpy as np
 from jax.sharding import Mesh
 
 from rig.kernels.fuzzy_topk import (
+    FUZZY_FEATURE_STAT_NAMES,
     FuzzyTopKConfig,
     fuzzy_topk_mlp,
+    fuzzy_topk_mlp_with_diagnostics,
     fuzzy_topk_relu,
     make_mesh_fuzzy_topk_mlp,
+    make_mesh_fuzzy_topk_mlp_with_diagnostics,
     naive_fuzzy_topk_mlp,
 )
 
@@ -84,6 +87,65 @@ class FuzzyTopKKernelTests(unittest.TestCase):
             atol=2e-6,
         )
 
+    def test_feature_diagnostics_match_literal_selected_feature_counts(self) -> None:
+        inputs = self.inputs()
+        top_k = 16
+        output, statistics = fuzzy_topk_mlp_with_diagnostics(
+            *inputs, config=FuzzyTopKConfig(top_k=top_k, backend="choicewise")
+        )
+        hidden = jnp.einsum("...d,dh->...h", inputs[0], inputs[1]) + inputs[2]
+        values, indices = fuzzy_topk_relu(hidden, top_k=top_k)
+        tokens = int(np.prod(values.shape[:-1]))
+        expected = np.zeros((len(FUZZY_FEATURE_STAT_NAMES), hidden.shape[-1]))
+        for feature in range(hidden.shape[-1]):
+            selected = np.asarray(indices == feature)
+            active = np.where(selected, np.asarray(values), 0.0)
+            expected[0, feature] = np.sum(selected) / tokens
+            expected[1, feature] = np.sum(active > 0.0) / tokens
+            expected[2, feature] = np.sum(active) / tokens
+            expected[3, feature] = np.sqrt(np.sum(np.square(active)) / tokens)
+
+        np.testing.assert_allclose(
+            output,
+            fuzzy_topk_mlp(
+                *inputs, config=FuzzyTopKConfig(top_k=top_k, backend="choicewise")
+            ),
+            rtol=2e-5,
+            atol=2e-6,
+        )
+        np.testing.assert_allclose(statistics, expected, rtol=2e-5, atol=2e-6)
+        reference_output, reference_statistics = fuzzy_topk_mlp_with_diagnostics(
+            *inputs, config=FuzzyTopKConfig(top_k=top_k, backend="reference")
+        )
+        np.testing.assert_allclose(reference_output, output, rtol=2e-5, atol=2e-6)
+        np.testing.assert_allclose(
+            reference_statistics, statistics, rtol=2e-5, atol=2e-6
+        )
+
+    def test_feature_diagnostic_auxiliary_does_not_change_gradients(self) -> None:
+        inputs = self.inputs()
+        config = FuzzyTopKConfig(top_k=16, backend="choicewise")
+
+        def diagnostic_loss(*operands):
+            output, _statistics = fuzzy_topk_mlp_with_diagnostics(
+                *operands, config=config
+            )
+            return jnp.square(output).mean()
+
+        def ordinary_loss(*operands):
+            return jnp.square(fuzzy_topk_mlp(*operands, config=config)).mean()
+
+        diagnostic_gradients = jax.grad(diagnostic_loss, argnums=(0, 1, 2, 3, 4))(
+            *inputs
+        )
+        ordinary_gradients = jax.grad(ordinary_loss, argnums=(0, 1, 2, 3, 4))(
+            *inputs
+        )
+        for actual, expected in zip(
+            diagnostic_gradients, ordinary_gradients, strict=True
+        ):
+            np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=1e-6)
+
     def test_contract_rejects_nonintegral_groups(self) -> None:
         x, up_weight, up_bias, down_weight, down_bias = self.inputs()
         with self.assertRaisesRegex(ValueError, "must be divisible"):
@@ -107,6 +169,13 @@ class FuzzyTopKKernelTests(unittest.TestCase):
         np.testing.assert_allclose(output, expected, rtol=2e-5, atol=2e-6)
         gradients = jax.grad(lambda *args: jnp.square(operation(*args)).mean())(*inputs)
         self.assertEqual(gradients.shape, inputs[0].shape)
+
+        diagnostic_operation = make_mesh_fuzzy_topk_mlp_with_diagnostics(
+            config=FuzzyTopKConfig(top_k=16), mesh=mesh
+        )
+        diagnostic_output, statistics = jax.jit(diagnostic_operation)(*inputs)
+        np.testing.assert_allclose(diagnostic_output, expected, rtol=2e-5, atol=2e-6)
+        self.assertEqual(statistics.shape, (len(FUZZY_FEATURE_STAT_NAMES), 64))
 
 
 if __name__ == "__main__":  # pragma: no cover
