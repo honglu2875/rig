@@ -114,6 +114,14 @@ _AXES_AND_SCALARS = (
     Metric(15, "moe.input_rms"),
     Metric(16, "moe.output_rms"),
     Metric(17, "moe.output_gradient_rms"),
+    # Fuzzy TopK feature diagnostics. These are stored as dense per-layer
+    # vectors in vectorlog rather than as millions of scalar logpack columns.
+    # Frequencies are fractions of tokens in the sampled global batch; moments
+    # include zero on tokens where the feature was not the positive winner.
+    Metric(18, "fuzzy.winner_frequency"),
+    Metric(19, "fuzzy.activation_frequency"),
+    Metric(20, "fuzzy.activation_mean"),
+    Metric(21, "fuzzy.activation_rms"),
 )
 
 _DIAGNOSTIC_FAMILY_BASES = (("param", 100), ("grad", 200), ("update", 300))

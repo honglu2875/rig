@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-sparsity-diagnostics-ladder-60m-125m-250m-3seed",
+  "status": "planned_pending_v4_32_throughput_gate",
+  "objective": "Measure full per-feature winner and positive-activation behavior across the completed fuzzy TopK ladder without changing its model, optimizer, data order, or learning horizon.",
+  "hypotheses": {
+    "dead_features": "The 16D dictionary does not obtain its quality gain by leaving a large, persistent population of features inactive.",
+    "competition": "Winner use within each fixed group remains distributed rather than collapsing onto one permanently dominant feature.",
+    "scaling": "Dead-feature and competition statistics remain qualitatively stable from the 60M through 250M dense-equivalent tiers."
+  },
+  "scope": {
+    "included_arm": "fuzzy_topk",
+    "excluded_arms": [
+      "dense",
+      "double_fuzzy_topk"
+    ],
+    "reason": "Only the fuzzy arm has the outer grouped selector whose neuron-level mechanism is under measurement. Existing dense and fuzzy quality endpoints remain the comparison reference; this rerun adds observations rather than a new treatment."
+  },
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "recipe": "fuzzy_topk_autoencoder",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "checkpoint_policy": "none",
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ]
+  },
+  "source_contract": {
+    "fuzzy_train_py_sha256": "1e3cac41fa70af839b954fe399055400ab824a9be0abd86ddcc3b155bc81db0e",
+    "fuzzy_dev_config_sha256": "35ebd3ca279a100bf7c76299955bbcb664c4f1cc959e21f5c332270d82aad7a4",
+    "fuzzy_kernel_sha256": "e7e7b705b1ebd932d34dc18af9e84349db597ebb45ffca49b6146806d15932d3",
+    "vector_log_format_sha256": "f38bda9e9589f3d35d0d203265601dfb6e774eb1ad2bb9430490527d2adde195",
+    "study_report_builder_sha256": "3013dbfbef16137b124ab595f063f5c179906bcd863bc8c66a3a61d70996a11e"
+  },
+  "instrumentation": {
+    "capture_schedule": "optimizer step 1, every 100 steps, and the exact final optimizer step",
+    "capture_cadence_steps": 100,
+    "batch_scope": "global data-parallel batch after mesh-wide psum",
+    "tensor_layout": "float32[capture, metric, layer, stored_feature]",
+    "artifact": "fuzzy_sparsity.rigvec",
+    "metric_order": [
+      "fuzzy.winner_frequency",
+      "fuzzy.activation_frequency",
+      "fuzzy.activation_mean",
+      "fuzzy.activation_rms"
+    ],
+    "metric_definitions": {
+      "fuzzy.winner_frequency": "fraction of sampled global-batch tokens for which the stored feature wins its fixed group before ReLU",
+      "fuzzy.activation_frequency": "fraction of sampled global-batch tokens for which the feature wins and its retained ReLU value is strictly positive",
+      "fuzzy.activation_mean": "unconditional mean retained activation, with zero on every token where the feature is inactive",
+      "fuzzy.activation_rms": "unconditional RMS retained activation, with zero on every token where the feature is inactive"
+    },
+    "gradient_interpretation": "Positive activation frequency gives current-batch structural data-gradient support for the corresponding UP column and DOWN row. Adam momentum and weight decay can still produce a dense parameter delta.",
+    "runtime_isolation": "Non-capture steps use the ordinary executable. Capture reductions share the existing four choicewise decoder passes, the auxiliary tensor has stopped gradients, only the controller transfers it, and the growing file remains a dotted temporary excluded from periodic salvage rsync until one successful atomic rename.",
+    "browser_policy": "Keep raw neuron vectors only in the downloadable rigvec artifact; embed compact capture-by-layer reductions in snapshot.json.gz and full.json.gz."
+  },
+  "throughput_gate": {
+    "accelerator": "v4-32",
+    "controls": [
+      {
+        "sparsity_diagnostics_every": 0,
+        "meaning": "instrumentation disabled"
+      },
+      {
+        "sparsity_diagnostics_every": 10,
+        "meaning": "feature captures aligned with the existing every-10-step model diagnostics"
+      }
+    ],
+    "tiers": [
+      "60m",
+      "250m"
+    ],
+    "projection": "Use the measured cadence-10 excess to conservatively estimate cadence-100 amortized overhead.",
+    "acceptance": "Projected cadence-100 training-time overhead must be no more than 5%, with no unexplained ordinary-step throughput regression. A failed gate blocks the nine quality-length runs pending implementation work."
+  },
+  "tiers": {
+    "60m": {
+      "d_model": 384,
+      "layers": 11,
+      "dictionary_width": 6144,
+      "retained_width": 1536,
+      "group_size": 4,
+      "stored_parameters": 97123584,
+      "schedule_steps": 2316,
+      "planned_tokens": 303562752,
+      "expected_captures_per_run": 25,
+      "expected_rigvec_bytes_per_run": 27033756,
+      "recipe_overrides": [
+        "--sparse-layers",
+        "11",
+        "--sparse-top-k",
+        "1536",
+        "--sparse-training-steps",
+        "2316"
+      ]
+    },
+    "125m": {
+      "d_model": 640,
+      "layers": 11,
+      "dictionary_width": 10240,
+      "retained_width": 2560,
+      "group_size": 4,
+      "stored_parameters": 226753280,
+      "schedule_steps": 4656,
+      "planned_tokens": 610271232,
+      "expected_captures_per_run": 48,
+      "expected_rigvec_bytes_per_run": 86507768,
+      "recipe_overrides": [
+        "--sparse-layers",
+        "11",
+        "--sparse-top-k",
+        "2560",
+        "--sparse-training-steps",
+        "4656"
+      ]
+    },
+    "250m": {
+      "d_model": 896,
+      "layers": 14,
+      "dictionary_width": 14336,
+      "retained_width": 3584,
+      "group_size": 4,
+      "stored_parameters": 495053440,
+      "schedule_steps": 9402,
+      "planned_tokens": 1232338944,
+      "expected_captures_per_run": 96,
+      "expected_rigvec_bytes_per_run": 308281784,
+      "recipe_overrides": [
+        "--sparse-layers",
+        "14",
+        "--sparse-top-k",
+        "3584",
+        "--sparse-training-steps",
+        "9402"
+      ]
+    }
+  },
+  "launch_policy": "After the throughput gate and standard v4-32 preflights pass, launch all nine cells sequentially in 60M, 125M, 250M order and increasing seed within tier. Do not retry, select, or stop based on intermediate loss or sparsity observations.",
+  "stopping_rule": "Every admitted cell runs through its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",
+  "expected_total_rigvec_bytes": 1265469924
+}

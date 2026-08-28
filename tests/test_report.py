@@ -12,9 +12,10 @@ import unittest
 
 import numpy as np
 
-from rig import logpack
+from rig import logpack, vectorlog
 from rig.report import (
     DIAGNOSTICS_LOG_NAME,
+    FUZZY_SPARSITY_LOG_NAME,
     TRAINING_LOG_NAME,
     ReportError,
     export_study,
@@ -31,6 +32,44 @@ from rig.report import (
 
 
 class ReportTests(unittest.TestCase):
+    def test_fuzzy_feature_vectors_build_layer_charts_and_remain_raw_logs(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            run = runs / "fuzzy-vectors"
+            run.mkdir(parents=True)
+            _write_training(run, [(4.5, 1e-4, 0.5), (4.0, 9e-5, 0.4)])
+            _write_result(run, validation_artifact=False)
+            result = json.loads((run / "result.json").read_text(encoding="utf-8"))
+            result["artifacts"]["fuzzy_sparsity"] = FUZZY_SPARSITY_LOG_NAME
+            result["contract"] = {
+                "model": {
+                    "layers": 2,
+                    "d_model": 2,
+                    "mlp_mult": 4,
+                    "mlp_top_k": 4,
+                }
+            }
+            (run / "result.json").write_text(json.dumps(result), encoding="utf-8")
+            _write_fuzzy_sparsity(run / FUZZY_SPARSITY_LOG_NAME)
+
+            build_report(runs, root / "report.html")
+            html = (root / "report.html").read_text(encoding="utf-8")
+            payload = _payload(html)
+
+        self.assertEqual(len(payload["featureCharts"]), 9)
+        self.assertIn('id="feature-charts"', html)
+        self.assertIn("...(D.featureCharts||[])", html)
+        self.assertIn(FUZZY_SPARSITY_LOG_NAME, payload["runs"][0]["riglogs"])
+        sampled_dead = next(
+            chart
+            for chart in payload["featureCharts"]
+            if chart["key"] == "fuzzy_sampled_dead_fraction"
+        )
+        self.assertEqual(sampled_dead["series"][0]["steps"], [1, 2])
+
     def test_block_local_moe_metrics_are_charted_as_their_mean(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -611,6 +650,39 @@ def _write_diagnostics(
             writer.append(step, values)
 
 
+def _write_fuzzy_sparsity(path: Path) -> None:
+    with vectorlog.VectorLogWriter(
+        path,
+        (
+            "fuzzy.winner_frequency",
+            "fuzzy.activation_frequency",
+            "fuzzy.activation_mean",
+            "fuzzy.activation_rms",
+        ),
+        layer_count=2,
+        feature_count=8,
+        group_size=2,
+        tokens_per_step=10,
+        flops_per_token=100.0,
+    ) as writer:
+        winner = np.full((2, 8), 0.5, np.float32)
+        for step, active in (
+            (1, np.tile([0.5, 0.0], (2, 4)).astype(np.float32)),
+            (2, np.full((2, 8), 0.25, np.float32)),
+        ):
+            writer.append(
+                step,
+                np.stack(
+                    (
+                        winner,
+                        active,
+                        2.0 * active,
+                        2.0 * np.sqrt(active),
+                    )
+                ),
+            )
+
+
 def _record_for_run(run: Path, *, validation: bool) -> dict[str, object]:
     record: dict[str, object] = {
         "run_id": run.name,
@@ -735,6 +807,32 @@ class StudyExportTests(unittest.TestCase):
         self.assertEqual(
             folders, ["60m-5tpp-bs1-lr2e-8-s1337", "60m-5tpp-bs1-lr2e-8-s1338"]
         )
+
+    def test_it_copies_declared_fuzzy_feature_vector_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            for run in sorted(path for path in runs.iterdir() if path.is_dir()):
+                result_path = run / "result.json"
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                result["artifacts"]["fuzzy_sparsity"] = FUZZY_SPARSITY_LOG_NAME
+                result["contract"]["model"] = {
+                    "layers": 2,
+                    "d_model": 2,
+                    "mlp_mult": 4,
+                    "mlp_top_k": 4,
+                }
+                result_path.write_text(json.dumps(result), encoding="utf-8")
+                _write_fuzzy_sparsity(run / FUZZY_SPARSITY_LOG_NAME)
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(path for path in summary["path"].iterdir() if path.is_dir())
+            copied = [
+                (folder / FUZZY_SPARSITY_LOG_NAME).is_file() for folder in folders
+            ]
+
+        self.assertEqual(len(folders), 2)
+        self.assertTrue(all(copied))
 
     def test_a_routed_run_does_not_overwrite_the_dense_run_beside_it(self) -> None:
         """Routing is not one of the coordinates the name is built from.
@@ -1505,6 +1603,7 @@ class ClientSourceGuardTests(unittest.TestCase):
         self.assertIn("c.series.filter(s=>keep.has(s.run))", body)
         for field in ("timeCharts", "diagnosticCharts", "layerCharts"):
             self.assertIn(f"{field}:pick(D.{field})", body)
+        self.assertIn("featureCharts:pick(D.featureCharts||[])", body)
 
     def test_shell_is_captured_before_init_mutates_the_dom(self) -> None:
         # init() rewrites the run list and chart containers, so a shell taken

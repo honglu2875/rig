@@ -55,3 +55,7 @@ metric	14	moe.local_loss
 metric	15	moe.input_rms
 metric	16	moe.output_rms
 metric	17	moe.output_gradient_rms
+metric	18	fuzzy.winner_frequency
+metric	19	fuzzy.activation_frequency
+metric	20	fuzzy.activation_mean
+metric	21	fuzzy.activation_rms

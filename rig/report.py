@@ -25,7 +25,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from rig import logpack
+from rig import logpack, vectorlog
 
 # ``metrics`` is a local name in several readers, so the registry is
 # imported under a distinct one rather than being shadowed.
@@ -34,8 +34,10 @@ from rig import metrics as metrics_registry
 
 _MAX_JSON_BYTES = 4 * 1024 * 1024
 _MAX_ARTIFACT_BYTES = 128 * 1024 * 1024
+_MAX_VECTOR_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
 TRAINING_LOG_NAME = f"training{logpack.SUFFIX}"
 DIAGNOSTICS_LOG_NAME = f"diagnostics{logpack.SUFFIX}"
+FUZZY_SPARSITY_LOG_NAME = f"fuzzy_sparsity{vectorlog.SUFFIX}"
 # One budget for every series, so nothing in a file sits at a different
 # fidelity than anything beside it. These single-file reports are a portable
 # overview; the lossless originals live in the dataset repository, and the
@@ -151,6 +153,7 @@ class _Run:
     validation: list[dict[str, Any]]
     flop_source: str
     diagnostics: logpack.Log | None = None
+    fuzzy_sparsity: vectorlog.VectorLog | None = None
     layer_stats: dict[str, list[dict[str, float]]] = field(default_factory=dict)
     notices: list[str] = field(default_factory=list)
 
@@ -463,6 +466,17 @@ def _read_run(path: Path, record: dict[str, Any] | None, limit: int) -> _Run:
             f"{run_id}: {DIAGNOSTICS_LOG_NAME} was not recorded; "
             "diagnostic plots are unavailable."
         )
+    sparsity_path = _artifact_path(
+        path,
+        result,
+        "fuzzy_sparsity",
+        FUZZY_SPARSITY_LOG_NAME,
+        required=False,
+        max_bytes=_MAX_VECTOR_ARTIFACT_BYTES,
+    )
+    if sparsity_path is not None:
+        _check_record_artifact(sparsity_path, path, record, "fuzzy_sparsity")
+        run.fuzzy_sparsity = _read_fuzzy_sparsity(sparsity_path, training, result)
     if record is None:
         run.notices.append(
             f"{run_id}: not present in records.jsonl (shown as unledgered)."
@@ -517,6 +531,58 @@ def _read_diagnostics(path: Path, training: logpack.Log) -> logpack.Log:
         raise ReportError(f"{DIAGNOSTICS_LOG_NAME} runs past the training curve")
 
     _check_diagnostic_scopes(log)
+    return log
+
+
+def _read_fuzzy_sparsity(
+    path: Path, training: logpack.Log, result: Mapping[str, Any]
+) -> vectorlog.VectorLog:
+    """Validate one dense feature-vector log against its run contract."""
+
+    try:
+        log = vectorlog.read_vector_log(path)
+    except vectorlog.VectorLogError as error:
+        raise ReportError(str(error)) from error
+    if log.tokens_per_step != training.tokens_per_step:
+        raise ReportError(
+            f"{FUZZY_SPARSITY_LOG_NAME} token accounting disagrees with "
+            f"{TRAINING_LOG_NAME}"
+        )
+    if not _close(log.flops_per_token, training.flops_per_token):
+        raise ReportError(
+            f"{FUZZY_SPARSITY_LOG_NAME} FLOP accounting disagrees with "
+            f"{TRAINING_LOG_NAME}"
+        )
+    if len(log) == 0 or int(log.steps[0]) != 1:
+        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} must begin at optimizer step 1")
+    if int(log.steps[-1]) != int(training.steps[-1]):
+        raise ReportError(
+            f"{FUZZY_SPARSITY_LOG_NAME} does not contain the final training step"
+        )
+    expected_metrics = {
+        "fuzzy.winner_frequency",
+        "fuzzy.activation_frequency",
+        "fuzzy.activation_mean",
+        "fuzzy.activation_rms",
+    }
+    if set(log.metric_names) != expected_metrics:
+        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} has an unexpected metric set")
+
+    contract = _object(result.get("contract"), "result contract")
+    model = _object(contract.get("model"), "result model contract")
+    layers = _positive_int(model.get("layers"), "model layers")
+    width = _positive_int(model.get("d_model"), "model d_model")
+    multiplier = _positive_int(model.get("mlp_mult"), "model mlp_mult")
+    top_k = _positive_int(model.get("mlp_top_k"), "model mlp_top_k")
+    hidden_width = width * multiplier
+    if (
+        log.layer_count != layers
+        or log.feature_count != hidden_width
+        or log.group_size != hidden_width // top_k
+    ):
+        raise ReportError(
+            f"{FUZZY_SPARSITY_LOG_NAME} tensor shape disagrees with the model contract"
+        )
     return log
 
 
@@ -630,6 +696,7 @@ def _artifact_path(
     fallback: str,
     *,
     required: bool,
+    max_bytes: int = _MAX_ARTIFACT_BYTES,
 ) -> Path | None:
     artifacts = result.get("artifacts", {})
     if not isinstance(artifacts, dict):
@@ -652,7 +719,7 @@ def _artifact_path(
         return None
     if not resolved.is_file() or unresolved.is_symlink():
         raise ReportError(f"artifact {artifact_name} is not a regular file")
-    if resolved.stat().st_size > _MAX_ARTIFACT_BYTES:
+    if resolved.stat().st_size > max_bytes:
         raise ReportError(f"artifact {artifact_name} is implausibly large")
     return resolved
 
@@ -1080,13 +1147,17 @@ def _report_payload(
                 "validationLoss": metrics.get("validation_loss"),
                 "fresh10Loss": fresh_loss,
                 "qualified": qualified,
-                "hasLayerStats": bool(run.layer_stats) or run.has_layer_diagnostics(),
+                "hasLayerStats": (
+                    bool(run.layer_stats)
+                    or run.has_layer_diagnostics()
+                    or run.fuzzy_sparsity is not None
+                ),
                 "riglogs": sorted(
                     {
                         artifact
                         for artifact in (result.get("artifacts") or {}).values()
                         if isinstance(artifact, str)
-                        and artifact.endswith(logpack.SUFFIX)
+                        and artifact.endswith((logpack.SUFFIX, vectorlog.SUFFIX))
                         and "/" not in artifact
                         and "\\" not in artifact
                     }
@@ -1180,6 +1251,7 @@ def _report_payload(
 
     diagnostic_charts = _overall_diagnostic_charts(runs)
     layer_charts = _final_diagnostic_charts(runs, layer_snapshots)
+    feature_charts = _fuzzy_sparsity_charts(runs, layer_snapshots)
 
     missing_final_families = []
     for family in _DIAGNOSTIC_FAMILIES:
@@ -1213,6 +1285,7 @@ def _report_payload(
         "timeCharts": time_charts,
         "diagnosticCharts": diagnostic_charts,
         "layerCharts": layer_charts,
+        "featureCharts": feature_charts,
         "notices": list(dict.fromkeys(notices)),
         "skipped": [{"run": key, "reason": value} for key, value in skipped.items()],
     }
@@ -1444,6 +1517,167 @@ def _final_diagnostic_charts(
                         "series": series,
                     }
                 )
+    return charts
+
+
+_FUZZY_SPARSITY_CHARTS = (
+    (
+        "positive_group_fraction",
+        "Groups with a positive winner",
+        "fraction of fuzzy groups",
+    ),
+    (
+        "batch_dead_fraction",
+        "Features inactive in this sampled batch",
+        "fraction of stored features",
+    ),
+    (
+        "sampled_dead_fraction",
+        "Features never active in any sampled batch so far",
+        "fraction of stored features",
+    ),
+    (
+        "winner_entropy",
+        "Within-group winner entropy",
+        "normalized entropy; 1.0 is even",
+    ),
+    (
+        "winner_max_share",
+        "Dominant feature's winner share per group",
+        "mean group maximum",
+    ),
+    (
+        "active_frequency_p50",
+        "Median per-feature activation frequency",
+        "fraction of batch tokens",
+    ),
+    (
+        "active_frequency_p99",
+        "99th-percentile per-feature activation frequency",
+        "fraction of batch tokens",
+    ),
+    (
+        "conditional_activation_mean",
+        "Mean activation conditional on being active",
+        "activation",
+    ),
+    (
+        "conditional_activation_rms",
+        "Activation RMS conditional on being active",
+        "activation RMS",
+    ),
+)
+
+
+def _fuzzy_sparsity_summaries(log: vectorlog.VectorLog) -> dict[str, np.ndarray]:
+    """Reduce complete neuron vectors to compact ``[step, layer]`` views."""
+
+    raw_values = (
+        log.metric("fuzzy.winner_frequency"),
+        log.metric("fuzzy.activation_frequency"),
+        log.metric("fuzzy.activation_mean"),
+        log.metric("fuzzy.activation_rms"),
+    )
+    if any(value is None for value in raw_values):
+        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} is missing a required metric")
+    winner, active, activation_mean, activation_rms = (
+        np.asarray(value, dtype=np.float32) for value in raw_values
+    )
+    if not all(
+        np.all(np.isfinite(value))
+        for value in (winner, active, activation_mean, activation_rms)
+    ):
+        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} contains non-finite values")
+    if np.any(winner < 0.0) or np.any(active < 0.0) or np.any(active > winner + 1e-6):
+        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} has invalid feature frequencies")
+
+    groups = log.feature_count // log.group_size
+    grouped_winner = winner.reshape(
+        (len(log), log.layer_count, groups, log.group_size)
+    )
+    if not np.allclose(np.sum(grouped_winner, axis=-1), 1.0, rtol=1e-5, atol=1e-5):
+        raise ReportError(
+            f"{FUZZY_SPARSITY_LOG_NAME} winner frequencies do not sum to one per group"
+        )
+    safe_winner = np.where(grouped_winner > 0.0, grouped_winner, 1.0)
+    entropy = -np.sum(grouped_winner * np.log(safe_winner), axis=-1)
+    entropy = (
+        np.ones(entropy.shape[:-1], dtype=np.float32)
+        if log.group_size == 1
+        else np.mean(entropy / math.log(log.group_size), axis=-1)
+    )
+
+    seen = np.maximum.accumulate(active > 0.0, axis=0)
+    active_mass = np.sum(active, axis=-1)
+    mean_mass = np.sum(activation_mean, axis=-1)
+    square_mass = np.sum(np.square(activation_rms), axis=-1)
+    conditional_mean = np.divide(
+        mean_mass,
+        active_mass,
+        out=np.zeros_like(mean_mass),
+        where=active_mass > 0.0,
+    )
+    conditional_rms = np.sqrt(
+        np.divide(
+            square_mass,
+            active_mass,
+            out=np.zeros_like(square_mass),
+            where=active_mass > 0.0,
+        )
+    )
+    return {
+        "positive_group_fraction": log.group_size * np.mean(active, axis=-1),
+        "batch_dead_fraction": np.mean(active == 0.0, axis=-1),
+        "sampled_dead_fraction": np.mean(~seen, axis=-1),
+        "winner_entropy": entropy,
+        "winner_max_share": np.mean(np.max(grouped_winner, axis=-1), axis=-1),
+        "active_frequency_p50": np.quantile(active, 0.50, axis=-1),
+        "active_frequency_p99": np.quantile(active, 0.99, axis=-1),
+        "conditional_activation_mean": conditional_mean,
+        "conditional_activation_rms": conditional_rms,
+    }
+
+
+def _fuzzy_sparsity_charts(
+    runs: Sequence[_Run], snapshots: int
+) -> list[dict[str, Any]]:
+    """Build per-layer browser frames while raw per-neuron vectors stay lossless."""
+
+    summaries: dict[str, dict[str, np.ndarray]] = {}
+    for run in runs:
+        if run.fuzzy_sparsity is not None:
+            summaries[run.run_id] = _fuzzy_sparsity_summaries(run.fuzzy_sparsity)
+
+    charts: list[dict[str, Any]] = []
+    for key, title, label in _FUZZY_SPARSITY_CHARTS:
+        series = []
+        for run in runs:
+            log = run.fuzzy_sparsity
+            if log is None:
+                continue
+            keep = _subsample_indices(len(log), snapshots)
+            values = summaries[run.run_id][key][keep]
+            series.append(
+                {
+                    "run": run.run_id,
+                    "scopes": [
+                        [layer, f"block {layer}"] for layer in range(log.layer_count)
+                    ],
+                    "steps": [int(log.steps[index]) for index in keep],
+                    "values": [
+                        [_compact(float(value)) for value in row] for row in values
+                    ],
+                }
+            )
+        if series:
+            charts.append(
+                {
+                    "key": f"fuzzy_{key}",
+                    "title": title,
+                    "yLabel": label,
+                    "series": series,
+                }
+            )
     return charts
 
 
@@ -1867,6 +2101,7 @@ def export_study(
         for artifact in (
             TRAINING_LOG_NAME,
             DIAGNOSTICS_LOG_NAME,
+            FUZZY_SPARSITY_LOG_NAME,
             "validation.csv",
             "result.json",
             "metrics.json",
@@ -2123,7 +2358,7 @@ _HTML = r"""<!doctype html>
 <main class="main">
   <div class="top">
     <div><div class="eyebrow">Static performance dossier</div><h1>Training, at a glance.</h1><div class="stats" id="stats"></div></div>
-    <div><button class="ghost mobile-runs" id="open-runs">Choose runs</button><div class="axis-control" role="radiogroup" aria-label="Time-series x-axis"><label><input type="radio" name="axis" value="flops" checked><span>equi-FLOP</span></label><label><input type="radio" name="axis" value="step"><span>equi-step</span></label></div><div class="axis-hint" id="axis-hint">Estimated cumulative FLOPs</div><div class="export-row"><button class="ghost" id="export-runs" type="button">Export selection</button><button class="ghost" id="export-riglogs" type="button" hidden>Export .riglogs</button><span class="export-status" id="export-status" role="status" aria-live="polite"></span></div></div>
+    <div><button class="ghost mobile-runs" id="open-runs">Choose runs</button><div class="axis-control" role="radiogroup" aria-label="Time-series x-axis"><label><input type="radio" name="axis" value="flops" checked><span>equi-FLOP</span></label><label><input type="radio" name="axis" value="step"><span>equi-step</span></label></div><div class="axis-hint" id="axis-hint">Estimated cumulative FLOPs</div><div class="export-row"><button class="ghost" id="export-runs" type="button">Export selection</button><button class="ghost" id="export-riglogs" type="button" hidden>Export raw logs</button><span class="export-status" id="export-status" role="status" aria-live="polite"></span></div></div>
   </div>
   <div class="analysis-controls" aria-label="Scientific chart controls">
     <span class="control-title">Timeline x scale</span>
@@ -2157,6 +2392,8 @@ _HTML = r"""<!doctype html>
     <button class="ghost" id="layer-step-last" type="button">Last</button>
   </div>
   <div class="charts" id="layer-charts"></div>
+  <div class="section-title">Fuzzy TopK feature activity · sampled global batches, one vector per block</div>
+  <div class="charts" id="feature-charts"></div>
   <details class="fold" id="notices-fold" hidden>
     <summary class="section-title fold-head">Notices <span class="fold-count" id="notices-count"></span></summary>
     <div class="notice-wrap" id="notices"></div>
@@ -2354,10 +2591,10 @@ function hw(r){
 function buildRuns(){$('run-list').innerHTML=D.runs.map(r=>`<label class="run-toggle" data-search="${esc((r.label+' '+r.id+' '+r.classification+' '+(r.chip||'')).toLowerCase())}"><input type="checkbox" data-run="${esc(r.id)}" ${r.selected?'checked':''}><span class="dot" style="color:${r.color};background:${r.color}"></span><span class="run-name">${esc(r.label)}<small class="run-meta">${esc(r.classification)} · step ${fmt(r.finalStep,0)} · val ${fmt(r.validationLoss,4)}${hw(r)}${r.ledger?' · ledger ✓':' · unledgered'}</small></span></label>`).join('')||'<p class="subtle">No plot-able runs found.</p>';document.querySelectorAll('[data-run]').forEach(x=>x.onchange=()=>{x.checked?visible.add(x.dataset.run):visible.delete(x.dataset.run);resetViews();buildLayerSteps();schedule()})}
 function syncChecks(){document.querySelectorAll('[data-run]').forEach(x=>x.checked=visible.has(x.dataset.run))}
 function buildSummary(){if(!D.runs.length){$('summary').innerHTML='<div class="empty">No eligible run passed the report completeness, profile, and qualification checks.</div>';return}$('summary').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Run</th><th>Class</th><th>Steps</th><th>Tokens</th><th>Train s</th><th>Train loss</th><th>Val loss</th><th>Fresh10</th><th>FLOP x</th><th>Final scopes</th></tr></thead><tbody>${D.runs.map(r=>`<tr><td><span class="status" style="background:${r.color}"></span>${esc(r.label)}</td><td>${esc(r.classification)}</td><td>${fmt(r.finalStep,0)}</td><td>${fmt(r.tokens,0)}</td><td>${fmt(r.trainSeconds,2)}</td><td>${fmt(r.trainLoss,4)}</td><td>${fmt(r.validationLoss,4)}</td><td>${fmt(r.fresh10Loss,4)}</td><td title="${esc(r.flopSource)}">${r.flopSource.startsWith('derived:')?'derived':'logged'}</td><td>${r.hasLayerStats?'yes':'—'}</td></tr>`).join('')}</tbody></table></div>`}
-function buildCharts(){charts=[];makeGroup($('time-charts'),D.timeCharts,'time');makeGroup($('diagnostic-charts'),D.diagnosticCharts,'time');makeGroup($('layer-charts'),D.layerCharts,'layer');buildLayerSteps();buildFamilies();if(!D.diagnosticCharts.length)$('diagnostic-charts').innerHTML='<div class="empty">No included run recorded overall diagnostics.</div>';if(!D.layerCharts.length)$('layer-charts').innerHTML='<div class="empty">No included run recorded final model-scope diagnostics or retained compatible layer arrays.</div>'}
+function buildCharts(){const feature=D.featureCharts||[];charts=[];makeGroup($('time-charts'),D.timeCharts,'time');makeGroup($('diagnostic-charts'),D.diagnosticCharts,'time');makeGroup($('layer-charts'),D.layerCharts,'layer');makeGroup($('feature-charts'),feature,'layer');buildLayerSteps();buildFamilies();if(!D.diagnosticCharts.length)$('diagnostic-charts').innerHTML='<div class="empty">No included run recorded overall diagnostics.</div>';if(!D.layerCharts.length)$('layer-charts').innerHTML='<div class="empty">No included run recorded final model-scope diagnostics or retained compatible layer arrays.</div>';if(!feature.length)$('feature-charts').innerHTML='<div class="empty">No included fuzzy TopK run recorded per-feature activity vectors.</div>'}
 function makeGroup(root,data,type){root.innerHTML=data.map(c=>`<article class="chart" data-family="${esc(c.family||'')}"><div class="chart-head"><h2>${esc(c.title)}</h2><div class="chart-tools"><span class="chart-unit">${esc(c.yLabel)}</span><button class="icon-button reset-chart" title="Reset view" aria-label="Reset ${esc(c.title)} view">↺</button><button class="icon-button expand-chart" title="Open full panel" aria-label="Enlarge ${esc(c.title)}">⛶</button></div></div><div class="canvas-wrap"><canvas aria-label="${esc(c.title)}"></canvas></div></article>`).join('');[...root.querySelectorAll('.chart')].forEach((article,i)=>{const item={canvas:article.querySelector('canvas'),article,data:data[i],type,view:null,drag:null};article.querySelector('.reset-chart').onclick=()=>{item.view=null;redraw(item)};article.querySelector('.expand-chart').onclick=()=>openFocus(item);attachCanvas(item);charts.push(item)})}
 function buildLayerSteps(){
- const all=new Set();for(const c of D.layerCharts)for(const s of c.series)if(visible.has(s.run))for(const step of s.steps)all.add(step);
+ const all=new Set();for(const c of [...D.layerCharts,...(D.featureCharts||[])])for(const s of c.series)if(visible.has(s.run))for(const step of s.steps)all.add(step);
  layerSteps=[...all].sort((a,b)=>a-b);
  const wrap=$('layer-step-control'),slider=$('layer-step');
  wrap.hidden=layerSteps.length<2;
@@ -2542,11 +2779,11 @@ function selectedPayload(){
   pick=list=>list.map(c=>({...c,series:c.series.filter(s=>keep.has(s.run))})).filter(c=>c.series.length),
   runs=D.runs.filter(r=>keep.has(r.id)).map(r=>({...r,selected:true})),
   // A partial export must say so on its own face; a full one stays a copy.
-  notices=runs.length<D.runs.length
+ notices=runs.length<D.runs.length
    ?[...D.notices,'Exported subset: '+runs.length+' of '+D.runs.length+' runs from the report generated '+D.meta.generatedAt+'.']
    :D.notices;
  return{...D,meta:{...D.meta,included:runs.length,skipped:0},runs,notices,skipped:[],
-  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts)}}
+  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts),featureCharts:pick(D.featureCharts||[])}}
 async function packPayload(payload){
  // Nothing could have loaded this page without DecompressionStream, so its
  // counterpart is present too; refusing beats emitting a differently-shaped file.
@@ -2600,7 +2837,7 @@ function tarArchive(entries){
  parts.push(new Uint8Array(1024));return new Blob(parts,{type:'application/x-tar'})}
 function safeArchivePart(value){const part=String(value).replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^\.+/,'');return part||'run'}
 function riglogNames(run){
- const declared=Array.isArray(run.riglogs)?run.riglogs.filter(name=>typeof name==='string'&&/^[A-Za-z0-9._-]+\.riglog$/.test(name)):[];
+ const declared=Array.isArray(run.riglogs)?run.riglogs.filter(name=>typeof name==='string'&&/^[A-Za-z0-9._-]+\.(?:riglog|rigvec)$/.test(name)):[];
  return declared.length?declared:['training.riglog','diagnostics.riglog','diagnostics-partial.riglog']}
 async function fetchRiglogs(runs){
  const source=D.rawSource;if(!source||!source.repo||!source.study)throw new Error('raw .riglogs are available from reports opened through the study browser');
@@ -2611,22 +2848,23 @@ async function fetchRiglogs(runs){
   const response=await fetch(base+encodeURIComponent(run.id)+'/'+encodeURIComponent(name));
   if(response.status===404&&name!=='training.riglog')continue;
   if(!response.ok)throw new Error(run.id+'/'+name+' → HTTP '+response.status);
-  const blob=await response.blob(),magic=new Uint8Array(await blob.slice(0,8).arrayBuffer()),expected=[82,73,71,76,79,71,0,1];
-  if(magic.length!==expected.length||expected.some((value,index)=>magic[index]!==value))throw new Error(run.id+'/'+name+' is not a valid .riglog');
+  const blob=await response.blob(),magic=new Uint8Array(await blob.slice(0,8).arrayBuffer());let expected=[82,73,71,76,79,71,0,1];
+  if(name.endsWith('.rigvec'))expected=[82,73,71,70,86,69,67,1];
+  if(magic.length!==expected.length||expected.some((value,index)=>magic[index]!==value))throw new Error(run.id+'/'+name+' is not a valid raw rig log');
   entries.push({path:safeArchivePart(run.id)+'/'+name,blob})}
- if(!entries.length)throw new Error('the selected runs did not publish any .riglog files');
+ if(!entries.length)throw new Error('the selected runs did not publish any raw rig log files');
  return entries}
 async function exportRiglogs(){
  const runs=D.runs.filter(run=>visible.has(run.id));
  if(!runs.length){exportStatus('Select at least one run to export.',true);return}
- const name='riglogs-'+exportSlug(runs)+'.tar.gz';setExportBusy(true);exportStatus('Choose where to save the .riglog archive…');
+ const name='riglogs-'+exportSlug(runs)+'.tar.gz';setExportBusy(true);exportStatus('Choose where to save the raw-log archive…');
  try{
   const handle=await chooseSaveFile(name,'Selected raw rig logs','application/gzip','.gz');
   if(typeof CompressionStream!=='function')throw new Error('this browser cannot compress the archive (needs CompressionStream)');
-  const entries=await fetchRiglogs(runs);exportStatus('Packing '+entries.length+' original .riglog file'+(entries.length===1?'':'s')+'…');
+  const entries=await fetchRiglogs(runs);exportStatus('Packing '+entries.length+' original raw-log file'+(entries.length===1?'':'s')+'…');
   const stream=tarArchive(entries).stream().pipeThrough(new CompressionStream('gzip')),
    blob=await new Response(stream).blob(),saved=await saveBlob(blob,name,handle);
-  exportStatus(saved+' · '+entries.length+' .riglog file'+(entries.length===1?'':'s')+' · '+mb(blob.size))}
+  exportStatus(saved+' · '+entries.length+' raw-log file'+(entries.length===1?'':'s')+' · '+mb(blob.size))}
  catch(error){exportStatus(cancelled(error)?'Export cancelled.':'Export failed: '+String(error&&error.message||error),!cancelled(error))}
  finally{setExportBusy(false)}}
 loadPayload().then(payload=>{

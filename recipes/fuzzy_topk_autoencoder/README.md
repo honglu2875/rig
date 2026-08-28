@@ -240,6 +240,71 @@ the quality result and Hugging Face archive. See the static
 [`fuzzy-topk-three-arm-ladder` report](../../docs/reports/fuzzy-topk-three-arm-ladder.html)
 for the complete evidence and limitations.
 
+## Per-feature sparsity diagnostic rerun
+
+The versioned
+[`ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json`](ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json)
+reruns only the successful fuzzy arm at the same 60M, 125M, and 250M
+coordinates and paired seeds. Its purpose is mechanism measurement, not a new
+architecture comparison. On optimizer step 1, every 100 steps, and the exact
+final step, every block records four full `H`-feature vectors over the sampled
+global batch of `T=16*8192` tokens:
+
+```text
+winner_frequency[f]     = sum_t 1[i_t = f] / T
+activation_frequency[f] = sum_t 1[i_t = f and a_t > 0] / T
+activation_mean[f]      = sum_t a_t 1[i_t = f] / T
+activation_rms[f]       = sqrt(sum_t a_t^2 1[i_t = f] / T)
+```
+
+`winner_frequency` separates losing within-group competition from being
+selected before ReLU but remaining non-positive. `activation_frequency==0`
+identifies a feature that is dead in that sampled batch; accumulating the same
+test across captures identifies features never observed active. The activation
+moments provide conditional mean and RMS after division by activation
+frequency. A positive activation is also the structural data-gradient support
+for that feature's `W_up` column and `W_down` row on the sampled batch. This
+does not imply that its AdamW parameter delta is literally zero: momentum and
+weight decay may still move a parameter with zero current-batch data gradient.
+
+The raw append-only `fuzzy_sparsity.rigvec` tensor is float32 with shape
+`[capture, 4, L, H]`. It retains all neuron identities for offline plots. The
+study browser embeds only derived `[capture, layer]` summaries—batch-dead and
+sampled-never-active fractions, positive-group fraction, within-group winner
+entropy and maximum share, activation-frequency quantiles, and conditional
+activation moments—so opening the browser never downloads gigabytes of raw
+vectors. The browser's raw-log export fetches `.rigvec` files on explicit user
+request.
+
+This logging is deliberately sampled to protect throughput:
+
+- Non-capture steps invoke the pre-existing training executable and do not
+  form or return feature statistics.
+- Capture steps fuse counts and moments into the existing four decoder-choice
+  passes. They do not repeat `UP`, selection, or `DOWN`, and their auxiliary
+  output has a stopped gradient. A whole-update CPU test checks that parameters,
+  Adam state, loss, gradients, and ordinary diagnostics match the uninstrumented
+  update.
+- Only the controller transfers the replicated `[4,L,H]` tensor, immediately
+  appends it, and retains no device-side history. The growing file uses the
+  harness's hidden temporary-file convention, so opportunistic salvage does not
+  rescan it every minute; it becomes visible through one atomic rename after a
+  successful training loop.
+
+At cadence 100, the expected raw-log volumes are:
+
+| tier | captures/run | transfer/capture | raw/run | three seeds |
+|---|---:|---:|---:|---:|
+| 60M (`L=11,H=6,144`) | 25 | 1.03 MiB | 25.78 MiB | 77.34 MiB |
+| 125M (`L=11,H=10,240`) | 48 | 1.72 MiB | 82.50 MiB | 247.50 MiB |
+| 250M (`L=14,H=14,336`) | 96 | 3.06 MiB | 294.00 MiB | 882.00 MiB |
+
+The roughly 1.18 GiB total is acceptable; latency is the launch gate. Before
+the nine-run queue starts, v4-32 short runs compare cadence 0 with cadence 10
+at identical coordinates. The ladder proceeds only if the measured excess,
+projected to cadence 100, is at most 5% of training time and ordinary-step
+throughput remains unchanged within run noise.
+
 ## Commands
 
 CPU wiring and deterministic plan:
