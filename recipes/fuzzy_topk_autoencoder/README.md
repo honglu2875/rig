@@ -317,6 +317,18 @@ v4-32 short runs compare cadence 0 with the production cadence 10 at identical
 coordinates. The ladder proceeds if the measured cadence-10 excess is at most
 20% of training time and the ordinary optimizer trajectory remains unchanged.
 
+The v4-32 gate passed on the isolated-observer implementation:
+
+| tier | cadence 0 | cadence 10 | overhead | trajectory check |
+|---|---:|---:|---:|---|
+| 60M | 14.756 s | 16.791 s | 13.79% | byte-identical `training.riglog` |
+| 250M | 55.330 s | 57.075 s | 3.15% | byte-identical `training.riglog` |
+
+Each treatment wrote all 13 expected snapshots for the 120-step gate. The
+observer adds 10.26 seconds of one-time compilation at 60M and 14.37 seconds at
+250M; that cost is reported separately from training and amortizes over the
+full 2,316- to 9,402-step runs.
+
 ## Commands
 
 CPU wiring and deterministic plan:

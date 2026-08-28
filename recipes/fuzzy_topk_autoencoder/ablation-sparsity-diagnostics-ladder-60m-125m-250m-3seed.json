@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-sparsity-diagnostics-ladder-60m-125m-250m-3seed",
-  "status": "planned_pending_v4_32_throughput_gate",
+  "status": "throughput_gate_accepted_ready_to_launch",
   "objective": "Measure full per-feature winner and positive-activation behavior across the completed fuzzy TopK ladder without changing its model, optimizer, data order, or learning horizon.",
   "hypotheses": {
     "dead_features": "The 16D dictionary does not obtain its quality gain by leaving a large, persistent population of features inactive.",
@@ -83,7 +83,30 @@
       "250m"
     ],
     "production_cadence": 10,
-    "acceptance": "Measured cadence-10 training-time overhead must be no more than 20%. The observer must leave the ordinary optimizer trajectory unchanged. A failed gate blocks the nine quality-length runs pending implementation work."
+    "acceptance": "Measured cadence-10 training-time overhead must be no more than 20%. The observer must leave the ordinary optimizer trajectory unchanged. A failed gate blocks the nine quality-length runs pending implementation work.",
+    "status": "accepted",
+    "results": {
+      "60m": {
+        "control_run_id": "20260828T004240.657578Z-fuzzy_topk_autoencoder-60m-sparsity-observer-control-s1350-48e03c87",
+        "treatment_run_id": "20260828T004514.135210Z-fuzzy_topk_autoencoder-60m-sparsity-observer-c10-s1350-4cb7bfc1",
+        "control_train_seconds": 14.755976413143799,
+        "treatment_train_seconds": 16.7909694169648,
+        "training_overhead_percent": 13.790974902944031,
+        "observer_compile_seconds": 10.256887850118801,
+        "captured_points": 13,
+        "trajectory_check": "training.riglog files are byte-identical"
+      },
+      "250m": {
+        "control_run_id": "20260828T004815.945829Z-fuzzy_topk_autoencoder-250m-sparsity-observer-control-s1350-3ec39b9d",
+        "treatment_run_id": "20260828T005244.940377Z-fuzzy_topk_autoencoder-250m-sparsity-observer-c10-s1350-5783f4dd",
+        "control_train_seconds": 55.33036845480092,
+        "treatment_train_seconds": 57.07513278000988,
+        "training_overhead_percent": 3.153357503184262,
+        "observer_compile_seconds": 14.369529048912227,
+        "captured_points": 13,
+        "trajectory_check": "training.riglog files are byte-identical"
+      }
+    }
   },
   "excluded_development_attempts": {
     "combined_update_control": {
