@@ -246,7 +246,7 @@ The versioned
 [`ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json`](ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json)
 reruns only the successful fuzzy arm at the same 60M, 125M, and 250M
 coordinates and paired seeds. Its purpose is mechanism measurement, not a new
-architecture comparison. On optimizer step 1, every 100 steps, and the exact
+architecture comparison. On optimizer step 1, every 10 steps, and the exact
 final step, every block records four full `H`-feature vectors over the sampled
 global batch of `T=16*8192` tokens:
 
@@ -276,34 +276,46 @@ activation moments—so opening the browser never downloads gigabytes of raw
 vectors. The browser's raw-log export fetches `.rigvec` files on explicit user
 request.
 
-This logging is deliberately sampled to protect throughput:
+This logging is sampled densely enough to form a useful temporal dataset while
+keeping the training cost bounded:
 
 - Non-capture steps invoke the pre-existing training executable and do not
   form or return feature statistics.
-- Capture steps fuse counts and moments into the existing four decoder-choice
-  passes. They do not repeat `UP`, selection, or `DOWN`, and their auxiliary
-  output has a stopped gradient. A whole-update CPU test checks that parameters,
-  Adam state, loss, gradients, and ordinary diagnostics match the uninstrumented
-  update.
+- Capture steps first run a stateless forward-only observer, then invoke the
+  exact same ordinary/model-diagnostic update executable as every corresponding
+  uninstrumented step. The observer repeats one transformer forward at 10% of
+  steps, but performs no backward pass or optimizer work. Its feature reductions
+  share the four decoder-choice passes inside that observation. A whole-update
+  CPU test checks bitwise equality of parameters, Adam state, loss, gradients,
+  and ordinary diagnostics with and without first invoking the observer.
 - Only the controller transfers the replicated `[4,L,H]` tensor, immediately
   appends it, and retains no device-side history. The growing file uses the
   harness's hidden temporary-file convention, so opportunistic salvage does not
   rescan it every minute; it becomes visible through one atomic rename after a
   successful training loop.
 
-At cadence 100, the expected raw-log volumes are:
+An earlier prototype returned the feature vectors as an auxiliary from the
+differentiated update. Its 60M cadence-10 timing was not slower than its control,
+but the extra reductions caused XLA to choose a slightly different BF16 update
+path and the trajectories diverged after step 20. That implementation and both
+short diagnostic runs are explicitly excluded. The separate observer above was
+adopted because a logger must not perturb the scientific trajectory; CPU smoke
+controls produce byte-identical training logs and bitwise-identical checkpoint
+arrays with the observer off and on.
+
+At cadence 10, the expected raw-log volumes are:
 
 | tier | captures/run | transfer/capture | raw/run | three seeds |
 |---|---:|---:|---:|---:|
-| 60M (`L=11,H=6,144`) | 25 | 1.03 MiB | 25.78 MiB | 77.34 MiB |
-| 125M (`L=11,H=10,240`) | 48 | 1.72 MiB | 82.50 MiB | 247.50 MiB |
-| 250M (`L=14,H=14,336`) | 96 | 3.06 MiB | 294.00 MiB | 882.00 MiB |
+| 60M (`L=11,H=6,144`) | 233 | 1.03 MiB | 240.28 MiB | 720.84 MiB |
+| 125M (`L=11,H=10,240`) | 467 | 1.72 MiB | 802.66 MiB | 2.35 GiB |
+| 250M (`L=14,H=14,336`) | 942 | 3.06 MiB | 2.82 GiB | 8.45 GiB |
 
-The roughly 1.18 GiB total is acceptable; latency is the launch gate. Before
-the nine-run queue starts, v4-32 short runs compare cadence 0 with cadence 10
-at identical coordinates. The ladder proceeds only if the measured excess,
-projected to cadence 100, is at most 5% of training time and ordinary-step
-throughput remains unchanged within run noise.
+The roughly 11.51 GiB total is intentional: raw neuron identities and dense
+temporal coverage are the research product. Before the nine-run queue starts,
+v4-32 short runs compare cadence 0 with the production cadence 10 at identical
+coordinates. The ladder proceeds if the measured cadence-10 excess is at most
+20% of training time and the ordinary optimizer trajectory remains unchanged.
 
 ## Commands
 
