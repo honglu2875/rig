@@ -17,6 +17,7 @@ import gzip
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import tempfile
@@ -34,10 +35,11 @@ from rig import metrics as metrics_registry
 
 _MAX_JSON_BYTES = 4 * 1024 * 1024
 _MAX_ARTIFACT_BYTES = 128 * 1024 * 1024
-_MAX_VECTOR_ARTIFACT_BYTES = 8 * 1024 * 1024 * 1024
+_MAX_VECTOR_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 TRAINING_LOG_NAME = f"training{logpack.SUFFIX}"
 DIAGNOSTICS_LOG_NAME = f"diagnostics{logpack.SUFFIX}"
 FUZZY_SPARSITY_LOG_NAME = f"fuzzy_sparsity{vectorlog.SUFFIX}"
+FUZZY_SPARSITY_LOSSY_LOG_NAME = f"fuzzy_sparsity_lossy{vectorlog.SUFFIX}"
 # One budget for every series, so nothing in a file sits at a different
 # fidelity than anything beside it. These single-file reports are a portable
 # overview; the lossless originals live in the dataset repository, and the
@@ -154,6 +156,7 @@ class _Run:
     flop_source: str
     diagnostics: logpack.Log | None = None
     fuzzy_sparsity: vectorlog.VectorLog | None = None
+    fuzzy_sparsity_lossy: vectorlog.VectorLog | None = None
     layer_stats: dict[str, list[dict[str, float]]] = field(default_factory=dict)
     notices: list[str] = field(default_factory=list)
 
@@ -169,9 +172,7 @@ class _Run:
             return []
         return _points(self.training, values)
 
-    def training_scope_mean_points(
-        self, metric: str, scope: str
-    ) -> list[list[float]]:
+    def training_scope_mean_points(self, metric: str, scope: str) -> list[list[float]]:
         """Return one timeline after averaging a metric across a model scope.
 
         Some recipe-specific training metrics are naturally recorded per
@@ -477,6 +478,43 @@ def _read_run(path: Path, record: dict[str, Any] | None, limit: int) -> _Run:
     if sparsity_path is not None:
         _check_record_artifact(sparsity_path, path, record, "fuzzy_sparsity")
         run.fuzzy_sparsity = _read_fuzzy_sparsity(sparsity_path, training, result)
+        lossy_path = path / FUZZY_SPARSITY_LOSSY_LOG_NAME
+        if lossy_path.exists():
+            lossy_path = _regular_file(path, FUZZY_SPARSITY_LOSSY_LOG_NAME)
+            if lossy_path.stat().st_size > _MAX_VECTOR_ARTIFACT_BYTES:
+                raise ReportError(
+                    f"{FUZZY_SPARSITY_LOSSY_LOG_NAME} is implausibly large"
+                )
+            try:
+                lossy = vectorlog.read_vector_log(lossy_path)
+            except vectorlog.VectorLogError as error:
+                raise ReportError(str(error)) from error
+            source = run.fuzzy_sparsity
+            if (
+                lossy.metric_ids != source.metric_ids
+                or lossy.layer_count != source.layer_count
+                or lossy.feature_count != source.feature_count
+                or lossy.group_size != source.group_size
+                or lossy.tokens_per_step != source.tokens_per_step
+                or not _close(lossy.flops_per_token, source.flops_per_token)
+            ):
+                raise ReportError(
+                    f"{FUZZY_SPARSITY_LOSSY_LOG_NAME} metadata disagrees with "
+                    f"{FUZZY_SPARSITY_LOG_NAME}"
+                )
+            expected_indices = vectorlog.widening_step_indices(source.steps)
+            expected = source.steps[expected_indices]
+            if not np.array_equal(lossy.steps, expected):
+                raise ReportError(
+                    f"{FUZZY_SPARSITY_LOSSY_LOG_NAME} does not follow the declared "
+                    "widening schedule"
+                )
+            if not np.array_equal(lossy.values, source.values[expected_indices]):
+                raise ReportError(
+                    f"{FUZZY_SPARSITY_LOSSY_LOG_NAME} does not exactly preserve "
+                    "the selected source vectors"
+                )
+            run.fuzzy_sparsity_lossy = lossy
     if record is None:
         run.notices.append(
             f"{run_id}: not present in records.jsonl (shown as unledgered)."
@@ -1161,6 +1199,11 @@ def _report_payload(
                         and "/" not in artifact
                         and "\\" not in artifact
                     }
+                    | (
+                        {FUZZY_SPARSITY_LOSSY_LOG_NAME}
+                        if run.fuzzy_sparsity_lossy is not None
+                        else set()
+                    )
                 ),
             }
         )
@@ -1251,7 +1294,13 @@ def _report_payload(
 
     diagnostic_charts = _overall_diagnostic_charts(runs)
     layer_charts = _final_diagnostic_charts(runs, layer_snapshots)
-    feature_charts = _fuzzy_sparsity_charts(runs, layer_snapshots)
+    fuzzy_summaries = {
+        run.run_id: _fuzzy_sparsity_summaries(run.fuzzy_sparsity)
+        for run in runs
+        if run.fuzzy_sparsity is not None
+    }
+    feature_charts = _fuzzy_sparsity_charts(runs, layer_snapshots, fuzzy_summaries)
+    fuzzy_explorer = _fuzzy_sparsity_explorer(runs, fuzzy_summaries)
 
     missing_final_families = []
     for family in _DIAGNOSTIC_FAMILIES:
@@ -1286,6 +1335,7 @@ def _report_payload(
         "diagnosticCharts": diagnostic_charts,
         "layerCharts": layer_charts,
         "featureCharts": feature_charts,
+        "fuzzyExplorer": fuzzy_explorer,
         "notices": list(dict.fromkeys(notices)),
         "skipped": [{"run": key, "reason": value} for key, value in skipped.items()],
     }
@@ -1532,6 +1582,11 @@ _FUZZY_SPARSITY_CHARTS = (
         "fraction of stored features",
     ),
     (
+        "recent_dead_fraction",
+        "Features inactive across the trailing 10 sampled batches",
+        "fraction of stored features",
+    ),
+    (
         "sampled_dead_fraction",
         "Features never active in any sampled batch so far",
         "fraction of stored features",
@@ -1570,7 +1625,12 @@ _FUZZY_SPARSITY_CHARTS = (
 
 
 def _fuzzy_sparsity_summaries(log: vectorlog.VectorLog) -> dict[str, np.ndarray]:
-    """Reduce complete neuron vectors to compact ``[step, layer]`` views."""
+    """Reduce complete neuron vectors to compact ``[step, layer]`` views.
+
+    The source can be tens of gigabytes.  Process one capture at a time so the
+    cumulative dead-feature calculation needs only one ``[layer, feature]``
+    boolean array instead of materializing the full history in memory.
+    """
 
     raw_values = (
         log.metric("fuzzy.winner_frequency"),
@@ -1580,73 +1640,91 @@ def _fuzzy_sparsity_summaries(log: vectorlog.VectorLog) -> dict[str, np.ndarray]
     )
     if any(value is None for value in raw_values):
         raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} is missing a required metric")
-    winner, active, activation_mean, activation_rms = (
-        np.asarray(value, dtype=np.float32) for value in raw_values
-    )
-    if not all(
-        np.all(np.isfinite(value))
-        for value in (winner, active, activation_mean, activation_rms)
-    ):
-        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} contains non-finite values")
-    if np.any(winner < 0.0) or np.any(active < 0.0) or np.any(active > winner + 1e-6):
-        raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} has invalid feature frequencies")
-
+    winner_values, active_values, mean_values, rms_values = raw_values
+    shape = (len(log), log.layer_count)
+    summaries = {
+        key: np.empty(shape, dtype=np.float32) for key, _, _ in _FUZZY_SPARSITY_CHARTS
+    }
+    seen = np.zeros((log.layer_count, log.feature_count), dtype=np.bool_)
+    last_active = np.full((log.layer_count, log.feature_count), -1, dtype=np.int32)
     groups = log.feature_count // log.group_size
-    grouped_winner = winner.reshape(
-        (len(log), log.layer_count, groups, log.group_size)
-    )
-    if not np.allclose(np.sum(grouped_winner, axis=-1), 1.0, rtol=1e-5, atol=1e-5):
-        raise ReportError(
-            f"{FUZZY_SPARSITY_LOG_NAME} winner frequencies do not sum to one per group"
-        )
-    safe_winner = np.where(grouped_winner > 0.0, grouped_winner, 1.0)
-    entropy = -np.sum(grouped_winner * np.log(safe_winner), axis=-1)
-    entropy = (
-        np.ones(entropy.shape[:-1], dtype=np.float32)
-        if log.group_size == 1
-        else np.mean(entropy / math.log(log.group_size), axis=-1)
-    )
+    for index in range(len(log)):
+        winner = np.asarray(winner_values[index], dtype=np.float32)
+        active = np.asarray(active_values[index], dtype=np.float32)
+        activation_mean = np.asarray(mean_values[index], dtype=np.float32)
+        activation_rms = np.asarray(rms_values[index], dtype=np.float32)
+        if not all(
+            np.all(np.isfinite(value))
+            for value in (winner, active, activation_mean, activation_rms)
+        ):
+            raise ReportError(f"{FUZZY_SPARSITY_LOG_NAME} contains non-finite values")
+        if (
+            np.any(winner < 0.0)
+            or np.any(active < 0.0)
+            or np.any(active > winner + 1e-6)
+        ):
+            raise ReportError(
+                f"{FUZZY_SPARSITY_LOG_NAME} has invalid feature frequencies"
+            )
 
-    seen = np.maximum.accumulate(active > 0.0, axis=0)
-    active_mass = np.sum(active, axis=-1)
-    mean_mass = np.sum(activation_mean, axis=-1)
-    square_mass = np.sum(np.square(activation_rms), axis=-1)
-    conditional_mean = np.divide(
-        mean_mass,
-        active_mass,
-        out=np.zeros_like(mean_mass),
-        where=active_mass > 0.0,
-    )
-    conditional_rms = np.sqrt(
-        np.divide(
-            square_mass,
+        grouped_winner = winner.reshape((log.layer_count, groups, log.group_size))
+        if not np.allclose(np.sum(grouped_winner, axis=-1), 1.0, rtol=1e-5, atol=1e-5):
+            raise ReportError(
+                f"{FUZZY_SPARSITY_LOG_NAME} winner frequencies do not sum to "
+                "one per group"
+            )
+        safe_winner = np.where(grouped_winner > 0.0, grouped_winner, 1.0)
+        group_entropy = -np.sum(grouped_winner * np.log(safe_winner), axis=-1)
+        entropy = (
+            np.ones(log.layer_count, dtype=np.float32)
+            if log.group_size == 1
+            else np.mean(group_entropy / math.log(log.group_size), axis=-1)
+        )
+
+        seen |= active > 0.0
+        last_active[active > 0.0] = index
+        active_mass = np.sum(active, axis=-1)
+        mean_mass = np.sum(activation_mean, axis=-1)
+        square_mass = np.sum(np.square(activation_rms), axis=-1)
+        conditional_mean = np.divide(
+            mean_mass,
             active_mass,
-            out=np.zeros_like(square_mass),
+            out=np.zeros_like(mean_mass),
             where=active_mass > 0.0,
         )
-    )
-    return {
-        "positive_group_fraction": log.group_size * np.mean(active, axis=-1),
-        "batch_dead_fraction": np.mean(active == 0.0, axis=-1),
-        "sampled_dead_fraction": np.mean(~seen, axis=-1),
-        "winner_entropy": entropy,
-        "winner_max_share": np.mean(np.max(grouped_winner, axis=-1), axis=-1),
-        "active_frequency_p50": np.quantile(active, 0.50, axis=-1),
-        "active_frequency_p99": np.quantile(active, 0.99, axis=-1),
-        "conditional_activation_mean": conditional_mean,
-        "conditional_activation_rms": conditional_rms,
-    }
+        conditional_rms = np.sqrt(
+            np.divide(
+                square_mass,
+                active_mass,
+                out=np.zeros_like(square_mass),
+                where=active_mass > 0.0,
+            )
+        )
+        summaries["positive_group_fraction"][index] = log.group_size * np.mean(
+            active, axis=-1
+        )
+        summaries["batch_dead_fraction"][index] = np.mean(active == 0.0, axis=-1)
+        summaries["recent_dead_fraction"][index] = np.mean(
+            last_active < max(0, index - 9), axis=-1
+        )
+        summaries["sampled_dead_fraction"][index] = np.mean(~seen, axis=-1)
+        summaries["winner_entropy"][index] = entropy
+        summaries["winner_max_share"][index] = np.mean(
+            np.max(grouped_winner, axis=-1), axis=-1
+        )
+        summaries["active_frequency_p50"][index] = np.quantile(active, 0.50, axis=-1)
+        summaries["active_frequency_p99"][index] = np.quantile(active, 0.99, axis=-1)
+        summaries["conditional_activation_mean"][index] = conditional_mean
+        summaries["conditional_activation_rms"][index] = conditional_rms
+    return summaries
 
 
 def _fuzzy_sparsity_charts(
-    runs: Sequence[_Run], snapshots: int
+    runs: Sequence[_Run],
+    snapshots: int,
+    summaries: Mapping[str, Mapping[str, np.ndarray]],
 ) -> list[dict[str, Any]]:
     """Build per-layer browser frames while raw per-neuron vectors stay lossless."""
-
-    summaries: dict[str, dict[str, np.ndarray]] = {}
-    for run in runs:
-        if run.fuzzy_sparsity is not None:
-            summaries[run.run_id] = _fuzzy_sparsity_summaries(run.fuzzy_sparsity)
 
     charts: list[dict[str, Any]] = []
     for key, title, label in _FUZZY_SPARSITY_CHARTS:
@@ -1679,6 +1757,141 @@ def _fuzzy_sparsity_charts(
                 }
             )
     return charts
+
+
+_FUZZY_EXPLORER_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90, 0.99)
+_FUZZY_EXPLORER_HISTOGRAM_BINS = 48
+
+
+def _fuzzy_sparsity_explorer(
+    runs: Sequence[_Run], summaries: Mapping[str, Mapping[str, np.ndarray]]
+) -> dict[str, Any] | None:
+    """Build one-off neuron-distribution views at widening capture steps."""
+
+    rows: list[dict[str, Any]] = []
+    for run in runs:
+        raw = run.fuzzy_sparsity
+        if raw is None:
+            continue
+        indices = vectorlog.widening_step_indices(raw.steps)
+        source = run.fuzzy_sparsity_lossy or raw
+        source_indices = list(range(len(source))) if source is not raw else indices
+        active_values = source.metric("fuzzy.activation_frequency")
+        if active_values is None:
+            raise ReportError(
+                f"{source.path.name} is missing fuzzy.activation_frequency"
+            )
+
+        minimum_exponent = math.floor(math.log10(1.0 / raw.tokens_per_step))
+        edges = np.linspace(
+            minimum_exponent,
+            0.0,
+            _FUZZY_EXPLORER_HISTOGRAM_BINS + 1,
+            dtype=np.float64,
+        )
+        raw_positions = {int(step): index for index, step in enumerate(raw.steps)}
+        steps: list[int] = []
+        batch_dead: list[list[float]] = []
+        sampled_dead: list[list[float]] = []
+        recent_dead: list[list[float]] = []
+        positive_counts: list[list[int]] = []
+        quantile_frames: list[list[list[float | None]]] = []
+        histogram_frames: list[list[list[int]]] = []
+        for source_index in source_indices:
+            step = int(source.steps[source_index])
+            raw_index = raw_positions.get(step)
+            if raw_index is None:
+                raise ReportError(f"{source.path.name} contains a non-source step")
+            active = np.asarray(active_values[source_index], dtype=np.float32)
+            steps.append(step)
+            zeros = np.sum(active == 0.0, axis=-1)
+            batch_dead.append(
+                [_compact(float(value / raw.feature_count)) for value in zeros]
+            )
+            sampled_dead.append(
+                [
+                    _compact(float(value))
+                    for value in summaries[run.run_id]["sampled_dead_fraction"][
+                        raw_index
+                    ]
+                ]
+            )
+            recent_dead.append(
+                [
+                    _compact(float(value))
+                    for value in summaries[run.run_id]["recent_dead_fraction"][
+                        raw_index
+                    ]
+                ]
+            )
+            positive_counts.append([int(raw.feature_count - value) for value in zeros])
+
+            layer_quantiles: list[list[float | None]] = []
+            layer_histograms: list[list[int]] = []
+            for layer in range(raw.layer_count):
+                positive = active[layer][active[layer] > 0.0]
+                if len(positive):
+                    quantiles = np.quantile(positive, _FUZZY_EXPLORER_QUANTILES)
+                    layer_quantiles.append(
+                        [_compact(float(value)) for value in quantiles]
+                    )
+                    transformed = np.clip(
+                        np.log10(positive.astype(np.float64)), edges[0], edges[-1]
+                    )
+                    counts, _ = np.histogram(transformed, bins=edges)
+                else:
+                    layer_quantiles.append([None for _ in _FUZZY_EXPLORER_QUANTILES])
+                    counts = np.zeros(_FUZZY_EXPLORER_HISTOGRAM_BINS, dtype=np.int64)
+                layer_histograms.append(
+                    [int(zeros[layer]), *(int(value) for value in counts)]
+                )
+            quantile_frames.append(layer_quantiles)
+            histogram_frames.append(layer_histograms)
+
+        model = _object(
+            _object(run.result.get("contract"), "result contract").get("model"),
+            "result model contract",
+        )
+        rows.append(
+            {
+                "run": run.run_id,
+                "tier": str(model.get("tier", "unknown")),
+                "seed": int(run.result["seed"]),
+                "layers": raw.layer_count,
+                "features": raw.feature_count,
+                "groupSize": raw.group_size,
+                "tokensPerCapture": raw.tokens_per_step,
+                "steps": steps,
+                "histogramEdgesLog10": [_compact(float(value)) for value in edges],
+                "batchDeadFraction": batch_dead,
+                "recentDeadFraction": recent_dead,
+                "sampledDeadFraction": sampled_dead,
+                "positiveCounts": positive_counts,
+                "positiveFrequencyQuantiles": quantile_frames,
+                "activationFrequencyHistograms": histogram_frames,
+            }
+        )
+    if not rows:
+        return None
+    return {
+        "version": 1,
+        "schedule": {
+            "faithfulThrough": 200,
+            "firstGap": 100,
+            "rule": (
+                "retain every recorded capture through step 200; then target "
+                "300, 500, 900, 1700, ... by doubling the gap; always retain "
+                "the exact final capture"
+            ),
+        },
+        "quantileProbabilities": list(_FUZZY_EXPLORER_QUANTILES),
+        "histogram": {
+            "metric": "fuzzy.activation_frequency",
+            "zeroBin": "exactly zero in the sampled global batch",
+            "positiveTransform": "log10",
+        },
+        "runs": rows,
+    }
 
 
 def _diagnostic_scope_layout(
@@ -1986,9 +2199,7 @@ def _study_run_name(
             f"{input_width}-k{compact_active}d-l{layers}"
         )
     duration = (
-        "-duration"
-        if model.get("parameterization") == "completedp_duration_v1"
-        else ""
+        "-duration" if model.get("parameterization") == "completedp_duration_v1" else ""
     )
     decay = ""
     if include_weight_decay:
@@ -2037,7 +2248,13 @@ def _study_run_name(
 
 
 def export_study(
-    runs_dir: Path, target: Path, study: str, *, select: str | None = None
+    runs_dir: Path,
+    target: Path,
+    study: str,
+    *,
+    select: str | None = None,
+    link_artifacts: bool = False,
+    lossy_fuzzy: bool = False,
 ) -> dict[str, Any]:
     """Lay a study out the way the dataset repository expects it.
 
@@ -2079,21 +2296,22 @@ def export_study(
     # Archive names describe what varies. Keep the established compact names
     # for studies with one fixed coefficient, but include weight decay when it
     # is a scientific axis so otherwise-identical cells cannot collide.
-    include_weight_decay = len(
-        {_resolved_weight_decay(result) for _, result in candidates}
-    ) > 1
+    include_weight_decay = (
+        len({_resolved_weight_decay(result) for _, result in candidates}) > 1
+    )
 
     exported = 0
+    lossy_bytes = 0
     exported_names: dict[str, str] = {}
     for run, result in candidates:
-        name = _study_run_name(
-            result, include_weight_decay=include_weight_decay
-        ) or run.name
+        name = (
+            _study_run_name(result, include_weight_decay=include_weight_decay)
+            or run.name
+        )
         previous = exported_names.get(name)
         if previous is not None:
             raise ReportError(
-                f"study run name {name!r} collides for {previous!r} and "
-                f"{run.name!r}"
+                f"study run name {name!r} collides for {previous!r} and {run.name!r}"
             )
         exported_names[name] = run.name
         folder = destination / name
@@ -2108,7 +2326,26 @@ def export_study(
         ):
             source = run / artifact
             if source.is_file():
-                shutil.copy2(source, folder / artifact)
+                destination_path = folder / artifact
+                if link_artifacts:
+                    try:
+                        os.link(source, destination_path)
+                    except OSError as error:
+                        raise ReportError(
+                            f"could not hard-link immutable artifact {source} to "
+                            f"{destination_path}: {error}"
+                        ) from error
+                else:
+                    shutil.copy2(source, destination_path)
+        fuzzy_source = folder / FUZZY_SPARSITY_LOG_NAME
+        if lossy_fuzzy and fuzzy_source.is_file():
+            source_log = vectorlog.read_vector_log(fuzzy_source)
+            lossy_log = vectorlog.write_vector_log_subset(
+                fuzzy_source,
+                folder / FUZZY_SPARSITY_LOSSY_LOG_NAME,
+                vectorlog.widening_step_indices(source_log.steps),
+            )
+            lossy_bytes += lossy_log.path.stat().st_size
         entry = records.get(run.name)
         if entry is not None:
             ledger.append(json.dumps({**entry, "name": name, "folder": name}))
@@ -2160,6 +2397,7 @@ def export_study(
         "bytes": total,
         "snapshot_bytes": snapshot_bytes,
         "full_bytes": full_bytes,
+        "lossy_bytes": lossy_bytes,
         "readme": destination / "README.md",
     }
 
@@ -2219,6 +2457,8 @@ def build_study_browser(
         "timeCharts": [],
         "diagnosticCharts": [],
         "layerCharts": [],
+        "featureCharts": [],
+        "fuzzyExplorer": None,
         "notices": [],
         "skipped": [],
     }
@@ -2316,6 +2556,7 @@ _HTML = r"""<!doctype html>
 :root{--bg:#080b12;--panel:#101521;--panel2:#151b29;--line:#273247;--text:#edf4ff;--muted:#91a0b8;--accent:#7dd3fc;--good:#86efac;--warn:#fde047;--bad:#fca5a5;--radius:14px;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% -10%,#17233a 0,transparent 35rem),var(--bg);min-height:100vh}button,input{font:inherit}.shell{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;overflow:auto;border-right:1px solid var(--line);background:rgba(10,14,23,.94);backdrop-filter:blur(16px);padding:20px}.brand{font-weight:800;letter-spacing:.02em;font-size:17px}.brand b{color:var(--accent)}.subtle{color:var(--muted);font-size:12px;line-height:1.5}.side-actions{display:flex;gap:7px;margin:18px 0 10px}.ghost{border:1px solid var(--line);color:var(--muted);background:var(--panel);border-radius:8px;padding:6px 9px;cursor:pointer}.ghost:hover{color:var(--text);border-color:#41516d}.search{width:100%;border:1px solid var(--line);background:#090d16;color:var(--text);padding:9px 10px;border-radius:9px;outline:none}.search:focus{border-color:var(--accent)}.run-list{display:grid;gap:7px;margin-top:12px}.run-toggle{display:grid;grid-template-columns:auto 10px 1fr;gap:9px;align-items:start;padding:9px;border:1px solid transparent;border-radius:10px;cursor:pointer}.run-toggle:hover{background:var(--panel);border-color:var(--line)}.run-toggle input{margin-top:3px;accent-color:var(--accent)}.dot{width:9px;height:9px;border-radius:50%;margin-top:4px;box-shadow:0 0 14px currentColor}.run-name{font-size:12px;font-weight:650;overflow-wrap:anywhere}.run-meta{display:block;color:var(--muted);font-size:10px;margin-top:3px}.main{min-width:0;padding:26px 28px 60px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:20px}.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:750}.top h1{font-size:clamp(25px,3vw,42px);letter-spacing:-.04em;margin:5px 0 7px}.stats{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--line);background:rgba(16,21,33,.8);border-radius:999px;padding:7px 10px;color:var(--muted);font-size:12px}.pill strong{color:var(--text)}.axis-control{flex:none;border:1px solid var(--line);border-radius:11px;padding:4px;background:#090d16;display:flex}.axis-control label{cursor:pointer}.axis-control input{position:absolute;opacity:0;pointer-events:none}.axis-control span{display:block;padding:8px 11px;border-radius:7px;color:var(--muted);font-size:12px;font-weight:700}.axis-control input:checked+span{background:var(--panel2);color:var(--text);box-shadow:0 1px 5px #0008}.axis-hint{text-align:right;color:var(--muted);font-size:10px;margin-top:6px}.export-row{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:9px}.export-status{font-size:10px;color:var(--muted);text-align:right;max-width:250px;overflow-wrap:anywhere}.export-status.bad{color:var(--bad)}.ghost[disabled]{opacity:.55;cursor:progress}.notice-wrap{display:grid;gap:7px;margin:0 0 16px}.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}.fold>summary::-webkit-details-marker{display:none}.fold>summary::before{content:'\25B8';font-size:9px;color:var(--accent)}.fold[open]>summary::before{content:'\25BE'}.fold>summary:hover{color:var(--text)}.fold-count{color:var(--muted);font-weight:400}.notice{padding:10px 12px;border:1px solid #3d3940;background:#18161c;color:#c6b9c6;border-radius:10px;font-size:12px}.section-title{margin:30px 0 12px;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,410px),1fr));gap:12px}.chart{background:linear-gradient(145deg,rgba(20,27,42,.92),rgba(12,17,27,.92));border:1px solid var(--line);border-radius:var(--radius);padding:15px;min-width:0}.chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}.chart h2{font-size:14px;margin:0;letter-spacing:-.01em}.chart-unit{color:var(--muted);font-size:10px}.canvas-wrap{height:270px;position:relative}.chart canvas{display:block;width:100%;height:100%;touch-action:none}.tooltip{position:fixed;z-index:20;pointer-events:none;background:#070a11ec;border:1px solid #36435b;border-radius:8px;padding:7px 9px;box-shadow:0 12px 30px #000a;font-size:11px;line-height:1.45;display:none;max-width:270px}.empty{border:1px dashed var(--line);border-radius:var(--radius);padding:30px;color:var(--muted);text-align:center}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}th,td{text-align:right;padding:10px 12px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em}th:first-child,td:first-child{text-align:left}tbody tr:last-child td{border-bottom:0}.status{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.footer{color:var(--muted);font-size:11px;margin-top:26px}.mobile-runs{display:none}.skip details{color:var(--muted);font-size:12px}.skip summary{cursor:pointer}.skip code{color:var(--bad);white-space:normal;overflow-wrap:anywhere}@media(max-width:850px){.shell{grid-template-columns:1fr}.sidebar{display:none;position:fixed;z-index:30;width:min(88vw,320px);box-shadow:20px 0 70px #000;height:100vh}.sidebar.open{display:block}.main{padding:20px 14px 50px}.mobile-runs{display:inline-flex}.top{align-items:stretch;flex-direction:column}.axis-control{align-self:flex-start}.axis-hint{text-align:left}.export-row{justify-content:flex-start}.export-status{text-align:left}.canvas-wrap{height:240px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .analysis-controls{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:12px;padding:10px 12px;margin:0 0 18px}.control-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.smoothing-control{border:1px solid var(--line);border-radius:9px;padding:3px;background:#070b13;display:flex;flex-wrap:wrap}.smoothing-control label{cursor:pointer}.smoothing-control input{position:absolute;opacity:0;pointer-events:none}.smoothing-control span{display:block;padding:6px 9px;border-radius:6px;color:var(--muted);font-size:11px;font-weight:700}.smoothing-control input:checked+span{background:var(--panel2);color:var(--text);box-shadow:0 1px 4px #0008}.smooth-level{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;font-weight:700}.smooth-level input{width:76px;border:1px solid var(--line);border-radius:7px;background:#070b13;color:var(--text);padding:6px 7px;outline:none}.smooth-level input:focus{border-color:var(--accent)}.smooth-level input:disabled{opacity:.45}.smoothing-hint{flex:1 1 100%;color:var(--muted);font-size:10px;line-height:1.45}.chart-head{align-items:center}.chart-tools{display:flex;align-items:center;gap:5px}.icon-button{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;padding:4px 7px;cursor:pointer;line-height:1}.icon-button:hover,.icon-button:focus-visible{border-color:var(--line);color:var(--text);outline:none}.chart canvas{cursor:crosshair}.chart canvas.dragging{cursor:crosshair}.chart.family-hidden{display:none}.family-control{display:flex;gap:5px;margin:12px 0;flex-wrap:wrap}.family-control button{border:1px solid var(--line);background:#090d16;color:var(--muted);border-radius:8px;padding:7px 11px;cursor:pointer;font-weight:700;font-size:12px}.family-control button.active{background:var(--panel2);color:var(--text);border-color:#49617f}.tooltip{z-index:60}.focus-dialog{width:min(96vw,1500px);height:min(94vh,980px);padding:0;border:1px solid #43516a;border-radius:16px;background:var(--panel);color:var(--text);box-shadow:0 30px 100px #000d}.focus-dialog::backdrop{background:#03050ae8;backdrop-filter:blur(4px)}.focus-shell{height:100%;display:flex;flex-direction:column;padding:16px}.focus-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.focus-head h2{font-size:17px;margin:0}.focus-canvas{flex:1;min-height:0;margin-top:8px}.focus-canvas canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}.interaction-hint{color:var(--muted);font-size:10px;margin-top:7px}.layer-step{display:flex;align-items:center;gap:11px;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:11px;padding:9px 12px;margin:0 0 12px}.layer-step label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.layer-step input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}.layer-step output{font:11px ui-monospace,monospace;color:var(--text);min-width:9ch;text-align:right}@media(max-width:850px){.focus-dialog{width:100vw;height:100vh;max-width:none;max-height:none;border-radius:0}.analysis-controls{align-items:flex-start}.smoothing-control{width:100%}.smoothing-control label{flex:1;text-align:center}}
+.fuzzy-explorer{margin-top:28px}.fuzzy-explorer-note{color:var(--muted);font-size:11px;line-height:1.55;margin:-5px 0 12px}.fuzzy-explorer-controls{display:flex;align-items:end;gap:10px 14px;flex-wrap:wrap;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:12px;padding:11px 12px;margin-bottom:12px}.fuzzy-control{display:grid;gap:5px;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}.fuzzy-control select{min-width:105px;border:1px solid var(--line);border-radius:8px;background:#070b13;color:var(--text);padding:7px 9px;outline:none}.fuzzy-control select:focus{border-color:var(--accent)}.fuzzy-step{flex:1 1 280px}.fuzzy-step-row{display:flex;align-items:center;gap:9px}.fuzzy-step input{flex:1;min-width:150px;accent-color:var(--accent)}.fuzzy-step output{min-width:9ch;text-align:right;color:var(--text);font:11px ui-monospace,monospace;letter-spacing:0;text-transform:none}.fuzzy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.fuzzy-card{background:linear-gradient(145deg,rgba(20,27,42,.92),rgba(12,17,27,.92));border:1px solid var(--line);border-radius:var(--radius);padding:15px;min-width:0}.fuzzy-card h2{font-size:14px;margin:0}.fuzzy-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:5px}.fuzzy-card-head select{border:1px solid var(--line);border-radius:7px;background:#070b13;color:var(--text);padding:5px 7px;font-size:10px}.fuzzy-card p{color:var(--muted);font-size:10px;line-height:1.45;margin:0 0 7px}.fuzzy-canvas{height:310px}.fuzzy-canvas canvas{display:block;width:100%;height:100%}.fuzzy-readout{color:var(--muted);font:10px ui-monospace,monospace;margin-top:5px;min-height:1.4em}.fuzzy-wide{grid-column:1/-1}@media(max-width:900px){.fuzzy-grid{grid-template-columns:1fr}.fuzzy-wide{grid-column:auto}.fuzzy-canvas{height:270px}}
 .study-picker{position:fixed;inset:0;background:var(--bg);overflow:auto;z-index:50;padding:38px 22px}
 .study-inner{max-width:1000px;margin:0 auto}
 .study-title{font-size:26px;margin:0 0 6px}
@@ -2394,6 +2635,40 @@ _HTML = r"""<!doctype html>
   <div class="charts" id="layer-charts"></div>
   <div class="section-title">Fuzzy TopK feature activity · sampled global batches, one vector per block</div>
   <div class="charts" id="feature-charts"></div>
+  <section class="fuzzy-explorer" id="fuzzy-explorer" hidden>
+    <div class="section-title">Fuzzy TopK latent-distribution explorer · widening-step lossless vectors</div>
+    <p class="fuzzy-explorer-note" id="fuzzy-explorer-note"></p>
+    <div class="fuzzy-explorer-controls">
+      <label class="fuzzy-control">Model size<select id="fuzzy-tier"></select></label>
+      <label class="fuzzy-control">Seed<select id="fuzzy-seed"></select></label>
+      <label class="fuzzy-control">Layer<select id="fuzzy-layer"></select></label>
+      <label class="fuzzy-control fuzzy-step">Training step<span class="fuzzy-step-row"><input id="fuzzy-step" type="range" min="0" max="0" step="1" value="0"><output id="fuzzy-step-value">—</output></span></label>
+    </div>
+    <div class="fuzzy-grid">
+      <article class="fuzzy-card fuzzy-wide">
+        <div class="fuzzy-card-head"><h2>Dead latent fraction by layer over training</h2><select id="fuzzy-dead-kind" aria-label="Dead latent definition"><option value="batch">Inactive in current sampled batch</option><option value="recent">Inactive in trailing 10 sampled batches</option><option value="sampled">Never active in any sampled batch so far</option></select></div>
+        <p>Heatmap columns follow optimizer step on a logarithmic axis; color is the fraction of stored latents meeting the selected zero-activity definition.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-dead-canvas" aria-label="Dead latent fraction by layer and training step"></canvas></div>
+        <div class="fuzzy-readout" id="fuzzy-dead-readout"></div>
+      </article>
+      <article class="fuzzy-card">
+        <div class="fuzzy-card-head"><h2>Activation-frequency ridgeline over time</h2></div>
+        <p>One normalized ridge per retained step for the selected layer. The leftmost point is exactly-zero frequency; positive frequencies use log10 bins.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-ridge-canvas" aria-label="Activation frequency ridgeline over training"></canvas></div>
+      </article>
+      <article class="fuzzy-card">
+        <div class="fuzzy-card-head"><h2>Activation-frequency histogram at selected step</h2></div>
+        <p>Fraction of stored latents in the selected layer. Drag the training-step control above; zero is separate from the log-binned positive tail.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-hist-canvas" aria-label="Activation frequency histogram at selected training step"></canvas></div>
+        <div class="fuzzy-readout" id="fuzzy-hist-readout"></div>
+      </article>
+      <article class="fuzzy-card fuzzy-wide">
+        <div class="fuzzy-card-head"><h2>Positive activation-frequency quantiles by layer</h2></div>
+        <p>Quantiles are conditional on activation frequency being strictly positive in the sampled global batch; the y-axis is logarithmic.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-quantile-canvas" aria-label="Positive activation frequency quantiles by layer"></canvas></div>
+      </article>
+    </div>
+  </section>
   <details class="fold" id="notices-fold" hidden>
     <summary class="section-title fold-head">Notices <span class="fold-count" id="notices-count"></span></summary>
     <div class="notice-wrap" id="notices"></div>
@@ -2536,6 +2811,7 @@ async function loadPayload(){
  return payload.remote?chooseStudy(payload.remote):payload}
 const smoothCache=new WeakMap();
 let axis='flops', xScale='log', family='grad', smoothing='raw', charts=[], frame=0, focusItem=null, fullCacheStatus=null;
+let fuzzyRun=null,fuzzyStepIndex=0,fuzzyResizeObserver=null;
 // hoverX follows the pointer, pinnedX survives until clicked again, layerStep
 // is the snapshot the layer charts show. All three are in step space, which is
 // axis-independent, so they stay put when the x axis switches to FLOPs.
@@ -2554,7 +2830,7 @@ function init(){
  $('notices').innerHTML=D.notices.map(n=>`<div class="notice">${esc(n)}</div>`).join('');
  $('notices-count').textContent=D.notices.length?'('+D.notices.length+')':'';
  $('notices-fold').hidden=!D.notices.length;
- buildRuns(); buildSummary(); buildCharts(); buildSkipped(); updateSmoothingControls(true); updateAxisHint();
+ buildRuns(); buildSummary(); buildCharts(); buildFuzzyExplorer(); buildSkipped(); updateSmoothingControls(true); updateAxisHint();
  if(cameFromPicker){
   const back=document.createElement('button');
   back.className='ghost';back.id='back-to-studies';back.textContent='← All studies';
@@ -2592,6 +2868,69 @@ function buildRuns(){$('run-list').innerHTML=D.runs.map(r=>`<label class="run-to
 function syncChecks(){document.querySelectorAll('[data-run]').forEach(x=>x.checked=visible.has(x.dataset.run))}
 function buildSummary(){if(!D.runs.length){$('summary').innerHTML='<div class="empty">No eligible run passed the report completeness, profile, and qualification checks.</div>';return}$('summary').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Run</th><th>Class</th><th>Steps</th><th>Tokens</th><th>Train s</th><th>Train loss</th><th>Val loss</th><th>Fresh10</th><th>FLOP x</th><th>Final scopes</th></tr></thead><tbody>${D.runs.map(r=>`<tr><td><span class="status" style="background:${r.color}"></span>${esc(r.label)}</td><td>${esc(r.classification)}</td><td>${fmt(r.finalStep,0)}</td><td>${fmt(r.tokens,0)}</td><td>${fmt(r.trainSeconds,2)}</td><td>${fmt(r.trainLoss,4)}</td><td>${fmt(r.validationLoss,4)}</td><td>${fmt(r.fresh10Loss,4)}</td><td title="${esc(r.flopSource)}">${r.flopSource.startsWith('derived:')?'derived':'logged'}</td><td>${r.hasLayerStats?'yes':'—'}</td></tr>`).join('')}</tbody></table></div>`}
 function buildCharts(){const feature=D.featureCharts||[];charts=[];makeGroup($('time-charts'),D.timeCharts,'time');makeGroup($('diagnostic-charts'),D.diagnosticCharts,'time');makeGroup($('layer-charts'),D.layerCharts,'layer');makeGroup($('feature-charts'),feature,'layer');buildLayerSteps();buildFamilies();if(!D.diagnosticCharts.length)$('diagnostic-charts').innerHTML='<div class="empty">No included run recorded overall diagnostics.</div>';if(!D.layerCharts.length)$('layer-charts').innerHTML='<div class="empty">No included run recorded final model-scope diagnostics or retained compatible layer arrays.</div>';if(!feature.length)$('feature-charts').innerHTML='<div class="empty">No included fuzzy TopK run recorded per-feature activity vectors.</div>'}
+function fuzzySetOptions(select,values,label,preferred){
+ const wanted=preferred==null?null:String(preferred);select.innerHTML='';
+ for(const value of values){const option=document.createElement('option');option.value=String(value);option.textContent=label(value);select.appendChild(option)}
+ if(wanted!==null&&values.some(value=>String(value)===wanted))select.value=wanted}
+function fuzzyTierNumber(tier){const match=/[0-9.]+/.exec(String(tier));return match?Number(match[0]):Infinity}
+function buildFuzzyExplorer(){
+ const explorer=D.fuzzyExplorer,section=$('fuzzy-explorer');
+ if(!explorer||!Array.isArray(explorer.runs)||!explorer.runs.length){section.hidden=true;return}
+ section.hidden=false;
+ const tier=$('fuzzy-tier'),seed=$('fuzzy-seed'),layer=$('fuzzy-layer'),step=$('fuzzy-step');
+ const tiers=[...new Set(explorer.runs.map(run=>run.tier))].sort((a,b)=>fuzzyTierNumber(a)-fuzzyTierNumber(b));
+ fuzzySetOptions(tier,tiers,value=>String(value).toUpperCase(),tiers[0]);
+ const chooseRun=(resetStep=true)=>{
+  fuzzyRun=explorer.runs.find(run=>String(run.tier)===tier.value&&String(run.seed)===seed.value)||null;
+  if(!fuzzyRun)return;
+  const oldLayer=Number(layer.value)||0,layers=Array.from({length:fuzzyRun.layers},(_,index)=>index);
+  fuzzySetOptions(layer,layers,value=>`block ${value} · ${fuzzyRun.layers} layers`,Math.min(oldLayer,fuzzyRun.layers-1));
+  fuzzyStepIndex=resetStep?fuzzyRun.steps.length-1:Math.min(fuzzyStepIndex,fuzzyRun.steps.length-1);
+  step.max=String(fuzzyRun.steps.length-1);step.value=String(fuzzyStepIndex);
+  $('fuzzy-explorer-note').textContent=`${fuzzyRun.features.toLocaleString()} stored latents per layer · groups of ${fuzzyRun.groupSize} · ${fuzzyRun.tokensPerCapture.toLocaleString()} sampled tokens per capture. ${explorer.schedule.rule}. Every latent coordinate is retained at those steps; the raw ten-step log remains authoritative.`;
+  drawFuzzyExplorer()};
+ const syncSeeds=(resetStep=true)=>{
+  const previous=seed.value,seeds=explorer.runs.filter(run=>String(run.tier)===tier.value).map(run=>run.seed).sort((a,b)=>a-b);
+  fuzzySetOptions(seed,seeds,value=>`seed ${value}`,previous||seeds[0]);chooseRun(resetStep)};
+ tier.onchange=()=>syncSeeds(true);seed.onchange=()=>chooseRun(true);layer.onchange=()=>drawFuzzyExplorer();
+ step.oninput=()=>{fuzzyStepIndex=Number(step.value);drawFuzzyExplorer()};
+ $('fuzzy-dead-kind').onchange=()=>drawFuzzyDead();
+ syncSeeds(true);
+ if(fuzzyResizeObserver)fuzzyResizeObserver.disconnect();
+ fuzzyResizeObserver=new ResizeObserver(()=>drawFuzzyExplorer());fuzzyResizeObserver.observe(section)}
+function fuzzyCanvas(id){
+ const canvas=$(id),rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2),w=Math.max(1,rect.width),h=Math.max(1,rect.height);
+ if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}
+ const g=canvas.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);g.font='10px ui-monospace,monospace';return{g,w,h}}
+function fuzzyHeat(value,maximum){const t=Math.sqrt(Math.max(0,Math.min(1,value/(maximum||1))));return `rgb(${Math.round(20+220*t)},${Math.round(54+100*(1-t))},${Math.round(112+118*(1-t))})`}
+function fuzzyAxis(g,w,h,m){g.strokeStyle='#253047';g.lineWidth=1;g.beginPath();g.moveTo(m.l,m.t);g.lineTo(m.l,h-m.b);g.lineTo(w-m.r,h-m.b);g.stroke()}
+function fuzzySelectedLayer(){return Math.max(0,Math.min(fuzzyRun.layers-1,Number($('fuzzy-layer').value)||0))}
+function drawFuzzyExplorer(){
+ if(!fuzzyRun)return;fuzzyStepIndex=Math.max(0,Math.min(fuzzyRun.steps.length-1,fuzzyStepIndex));
+ $('fuzzy-step').value=String(fuzzyStepIndex);$('fuzzy-step-value').textContent='step '+fmt(fuzzyRun.steps[fuzzyStepIndex],0);
+ drawFuzzyDead();drawFuzzyRidge();drawFuzzyHistogram();drawFuzzyQuantiles()}
+function drawFuzzyDead(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-dead-canvas'),m={l:46,r:54,t:14,b:31},kind=$('fuzzy-dead-kind').value,data=kind==='sampled'?fuzzyRun.sampledDeadFraction:kind==='recent'?fuzzyRun.recentDeadFraction:fuzzyRun.batchDeadFraction,steps=fuzzyRun.steps;
+ const maximum=Math.max(1e-9,...data.flat().filter(Number.isFinite)),logs=steps.map(step=>Math.log10(Math.max(1,step))),lo=logs[0],hi=logs[logs.length-1]||lo+1,X=value=>m.l+(value-lo)/((hi-lo)||1)*(w-m.l-m.r),rowHeight=(h-m.t-m.b)/fuzzyRun.layers;
+ for(let index=0;index<steps.length;index++){const center=X(logs[index]),left=index?0.5*(center+X(logs[index-1])):m.l,right=index+1<steps.length?0.5*(center+X(logs[index+1])):w-m.r;for(let layer=0;layer<fuzzyRun.layers;layer++){g.fillStyle=fuzzyHeat(data[index][layer],maximum);g.fillRect(left,m.t+layer*rowHeight,Math.max(1,right-left+.4),Math.max(1,rowHeight+.4))}}
+ g.strokeStyle='#7dd3fc';g.lineWidth=1.5;const selected=X(logs[fuzzyStepIndex]);g.beginPath();g.moveTo(selected,m.t);g.lineTo(selected,h-m.b);g.stroke();fuzzyAxis(g,w,h,m);
+ g.fillStyle='#7e8da6';g.textAlign='right';for(let layer=0;layer<fuzzyRun.layers;layer+=Math.max(1,Math.ceil(fuzzyRun.layers/6)))g.fillText(String(layer),m.l-7,m.t+(layer+.65)*rowHeight);
+ g.textAlign='center';const stride=Math.max(1,Math.ceil(steps.length/5));for(let index=0;index<steps.length;index+=stride)g.fillText(fmt(steps[index],0),X(logs[index]),h-10);g.fillText(fmt(steps[steps.length-1],0),X(logs[logs.length-1]),h-10);
+ const legendX=w-m.r+13,gradient=g.createLinearGradient(0,m.t,0,h-m.b);gradient.addColorStop(0,fuzzyHeat(maximum,maximum));gradient.addColorStop(1,fuzzyHeat(0,maximum));g.fillStyle=gradient;g.fillRect(legendX,m.t,10,h-m.t-m.b);g.textAlign='left';g.fillStyle='#7e8da6';g.fillText((100*maximum).toFixed(maximum<.01?2:1)+'%',legendX+14,m.t+8);g.fillText('0',legendX+14,h-m.b);
+ const layer=fuzzySelectedLayer(),value=data[fuzzyStepIndex][layer],definition=kind==='sampled'?'never sampled active so far':kind==='recent'?'inactive across the trailing 10 sampled batches':'inactive in this sampled batch';$('fuzzy-dead-readout').textContent=`step ${fuzzyRun.steps[fuzzyStepIndex].toLocaleString()} · block ${layer} · ${(100*value).toFixed(4)}% ${definition} · heatmap maximum ${(100*maximum).toFixed(4)}%`}
+function drawFuzzyRidge(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-ridge-canvas'),m={l:58,r:18,t:13,b:31},layer=fuzzySelectedLayer(),frames=fuzzyRun.activationFrequencyHistograms,rows=frames.length,plotW=w-m.l-m.r,plotH=h-m.t-m.b,spacing=plotH/Math.max(1,rows),bins=frames[0][layer].length;
+ g.fillStyle='#7e8da6';g.textAlign='center';g.fillText('zero',m.l,h-10);g.fillText('positive activation frequency (log10)',m.l+plotW*.58,h-10);g.textAlign='right';
+ const labelStride=Math.max(1,Math.ceil(rows/6));for(let index=0;index<rows;index++){const counts=frames[index][layer],peak=Math.max(1,...counts),base=m.t+(index+.8)*spacing,highlight=index===fuzzyStepIndex;g.beginPath();for(let bin=0;bin<bins;bin++){const x=m.l+bin/(bins-1)*plotW,y=base-(counts[bin]/peak)*Math.min(12,spacing*.82);bin?g.lineTo(x,y):g.moveTo(x,y)}g.lineTo(w-m.r,base);g.lineTo(m.l,base);g.closePath();g.fillStyle=highlight?'rgba(125,211,252,.34)':'rgba(196,181,253,.12)';g.fill();g.strokeStyle=highlight?'#7dd3fc':'rgba(196,181,253,.55)';g.lineWidth=highlight?1.6:.8;g.stroke();if(index%labelStride===0||index===rows-1){g.fillStyle=highlight?'#edf4ff':'#7e8da6';g.fillText(fmt(fuzzyRun.steps[index],0),m.l-7,base)}}fuzzyAxis(g,w,h,m)}
+function drawFuzzyHistogram(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-hist-canvas'),m={l:48,r:14,t:14,b:36},layer=fuzzySelectedLayer(),counts=fuzzyRun.activationFrequencyHistograms[fuzzyStepIndex][layer],fractions=counts.map(value=>value/fuzzyRun.features),maximum=Math.max(1e-9,...fractions),plotW=w-m.l-m.r,plotH=h-m.t-m.b,bar=plotW/counts.length;
+ g.strokeStyle='#253047';g.fillStyle='#7e8da6';g.textAlign='right';for(let tick=0;tick<=4;tick++){const value=maximum*tick/4,y=h-m.b-value/maximum*plotH;g.beginPath();g.moveTo(m.l,y);g.lineTo(w-m.r,y);g.stroke();g.fillText((100*value).toFixed(value<.01?2:1)+'%',m.l-6,y+3)}
+ for(let index=0;index<fractions.length;index++){const height=fractions[index]/maximum*plotH;g.fillStyle=index===0?'#f9a8d4':'#7dd3fc';g.fillRect(m.l+index*bar+.5,h-m.b-height,Math.max(1,bar-1),height)}fuzzyAxis(g,w,h,m);g.fillStyle='#7e8da6';g.textAlign='center';g.fillText('zero',m.l+bar/2,h-11);g.fillText('10^'+fuzzyRun.histogramEdgesLog10[0],m.l+bar*1.5,h-11);g.fillText('positive frequency → 1',w-m.r,h-11);
+ const zeros=counts[0],positive=fuzzyRun.positiveCounts[fuzzyStepIndex][layer],median=fuzzyRun.positiveFrequencyQuantiles[fuzzyStepIndex][layer][2];$('fuzzy-hist-readout').textContent=`step ${fuzzyRun.steps[fuzzyStepIndex].toLocaleString()} · block ${layer} · ${zeros.toLocaleString()} zero (${(100*zeros/fuzzyRun.features).toFixed(4)}%) · ${positive.toLocaleString()} positive · positive median ${median==null?'—':Number(median).toPrecision(4)}`}
+function drawFuzzyQuantiles(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-quantile-canvas'),m={l:58,r:18,t:30,b:31},frame=fuzzyRun.positiveFrequencyQuantiles[fuzzyStepIndex],probabilities=D.fuzzyExplorer.quantileProbabilities,values=frame.flat().filter(value=>value!=null&&value>0),logMin=Math.floor(Math.log10(Math.min(...values))),logMax=Math.ceil(Math.log10(Math.max(...values))),lo=logMin===logMax?logMin-1:logMin,hi=logMin===logMax?logMax+1:logMax,X=layer=>m.l+(layer/Math.max(1,fuzzyRun.layers-1))*(w-m.l-m.r),Y=value=>m.t+(hi-Math.log10(value))/(hi-lo)*(h-m.t-m.b),colors=['#67e8f9','#7dd3fc','#86efac','#fde047','#fb923c','#f9a8d4'];
+ fuzzyAxis(g,w,h,m);g.strokeStyle='#253047';g.fillStyle='#7e8da6';g.textAlign='right';for(let exponent=lo;exponent<=hi;exponent++){const y=Y(10**exponent);g.beginPath();g.moveTo(m.l,y);g.lineTo(w-m.r,y);g.stroke();g.fillText('1e'+exponent,m.l-7,y+3)}g.textAlign='center';for(let layer=0;layer<fuzzyRun.layers;layer++)if(layer%Math.max(1,Math.ceil(fuzzyRun.layers/8))===0||layer===fuzzyRun.layers-1)g.fillText(String(layer),X(layer),h-10);
+ probabilities.forEach((probability,q)=>{g.strokeStyle=colors[q%colors.length];g.lineWidth=q===2?2:1.2;g.beginPath();let started=false;for(let layer=0;layer<fuzzyRun.layers;layer++){const value=frame[layer][q];if(value==null||value<=0)continue;const x=X(layer),y=Y(value);started?g.lineTo(x,y):g.moveTo(x,y);started=true}g.stroke();const legendX=m.l+q*(w-m.l-m.r)/probabilities.length;g.fillStyle=colors[q%colors.length];g.textAlign='left';g.fillText('q'+Math.round(probability*100),legendX,m.t-12)})}
 function makeGroup(root,data,type){root.innerHTML=data.map(c=>`<article class="chart" data-family="${esc(c.family||'')}"><div class="chart-head"><h2>${esc(c.title)}</h2><div class="chart-tools"><span class="chart-unit">${esc(c.yLabel)}</span><button class="icon-button reset-chart" title="Reset view" aria-label="Reset ${esc(c.title)} view">↺</button><button class="icon-button expand-chart" title="Open full panel" aria-label="Enlarge ${esc(c.title)}">⛶</button></div></div><div class="canvas-wrap"><canvas aria-label="${esc(c.title)}"></canvas></div></article>`).join('');[...root.querySelectorAll('.chart')].forEach((article,i)=>{const item={canvas:article.querySelector('canvas'),article,data:data[i],type,view:null,drag:null};article.querySelector('.reset-chart').onclick=()=>{item.view=null;redraw(item)};article.querySelector('.expand-chart').onclick=()=>openFocus(item);attachCanvas(item);charts.push(item)})}
 function buildLayerSteps(){
  const all=new Set();for(const c of [...D.layerCharts,...(D.featureCharts||[])])for(const s of c.series)if(visible.has(s.run))for(const step of s.steps)all.add(step);
@@ -2778,12 +3117,13 @@ function selectedPayload(){
  const keep=visible,
   pick=list=>list.map(c=>({...c,series:c.series.filter(s=>keep.has(s.run))})).filter(c=>c.series.length),
   runs=D.runs.filter(r=>keep.has(r.id)).map(r=>({...r,selected:true})),
+  fuzzyExplorer=D.fuzzyExplorer?{...D.fuzzyExplorer,runs:D.fuzzyExplorer.runs.filter(r=>keep.has(r.run))}:null,
   // A partial export must say so on its own face; a full one stays a copy.
  notices=runs.length<D.runs.length
    ?[...D.notices,'Exported subset: '+runs.length+' of '+D.runs.length+' runs from the report generated '+D.meta.generatedAt+'.']
    :D.notices;
  return{...D,meta:{...D.meta,included:runs.length,skipped:0},runs,notices,skipped:[],
-  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts),featureCharts:pick(D.featureCharts||[])}}
+  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts),featureCharts:pick(D.featureCharts||[]),fuzzyExplorer}}
 async function packPayload(payload){
  // Nothing could have loaded this page without DecompressionStream, so its
  // counterpart is present too; refusing beats emitting a differently-shaped file.

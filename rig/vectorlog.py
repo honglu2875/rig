@@ -65,9 +65,11 @@ def _header_size(metric_count: int) -> int:
 
 
 def _record_size(metric_count: int, layer_count: int, feature_count: int) -> int:
-    return _STEP_DTYPE.itemsize + _record_values(
-        metric_count, layer_count, feature_count
-    ) * _VALUE_DTYPE.itemsize
+    return (
+        _STEP_DTYPE.itemsize
+        + _record_values(metric_count, layer_count, feature_count)
+        * _VALUE_DTYPE.itemsize
+    )
 
 
 class VectorLogWriter:
@@ -239,8 +241,12 @@ def read_vector_log(path: Path) -> VectorLog:
     except OSError as exc:
         raise VectorLogError(f"could not read {path}: {exc}") from exc
 
-    metric_ids = tuple(int(value) for value in np.frombuffer(metric_bytes, _METRIC_DTYPE))
-    if len(set(metric_ids)) != len(metric_ids) or any(value <= 0 for value in metric_ids):
+    metric_ids = tuple(
+        int(value) for value in np.frombuffer(metric_bytes, _METRIC_DTYPE)
+    )
+    if len(set(metric_ids)) != len(metric_ids) or any(
+        value <= 0 for value in metric_ids
+    ):
         raise VectorLogError(f"{path} has duplicate or invalid metric ids")
     offset = _header_size(metric_count)
     stride = _record_size(metric_count, layer_count, feature_count)
@@ -282,6 +288,92 @@ def read_vector_log(path: Path) -> VectorLog:
     )
 
 
+def widening_step_indices(
+    steps: Sequence[int] | np.ndarray,
+    *,
+    faithful_through: int = 200,
+    first_gap: int = 100,
+) -> list[int]:
+    """Select a dense prefix followed by geometrically widening step gaps.
+
+    Every recorded capture through ``faithful_through`` is retained.  Later
+    targets begin at ``faithful_through + first_gap`` and double the gap after
+    each target.  For the sparsity study's ten-step source cadence, the result
+    is ``1, 10, 20, ..., 190, 200, 300, 500, 900, 1700, ...``.  The exact final
+    capture is always retained.
+
+    A source need not contain an exact target: the first capture at or after
+    it is used.  This keeps the maximum intended gap bounded without inventing
+    or interpolating a vector that was never recorded.
+    """
+
+    array = np.asarray(steps)
+    if array.ndim != 1 or not np.issubdtype(array.dtype, np.integer):
+        raise ValueError("vector-log steps must be a one-dimensional integer array")
+    if faithful_through <= 0 or first_gap <= 0:
+        raise ValueError("step schedule bounds must be positive")
+    if len(array) == 0:
+        return []
+    if np.any(array <= 0) or (len(array) > 1 and np.any(np.diff(array) <= 0)):
+        raise ValueError("vector-log steps must be positive and strictly increasing")
+
+    selected = set(int(index) for index in np.flatnonzero(array <= faithful_through))
+    final_index = len(array) - 1
+    final_step = int(array[final_index])
+    target = faithful_through
+    gap = first_gap
+    while target + gap < final_step:
+        target += gap
+        index = int(np.searchsorted(array, target, side="left"))
+        if index < final_index:
+            selected.add(index)
+        gap *= 2
+    selected.add(0)
+    selected.add(final_index)
+    return sorted(selected)
+
+
+def write_vector_log_subset(
+    source: Path,
+    destination: Path,
+    indices: Sequence[int],
+) -> VectorLog:
+    """Copy selected complete records into a new, self-describing vector log.
+
+    The source remains authoritative.  This helper is intended for browser and
+    notebook companions that preserve every metric, layer, and feature at a
+    deliberately reduced set of capture steps.
+    """
+
+    source_log = read_vector_log(source)
+    destination = Path(destination)
+    if destination.exists():
+        raise FileExistsError(f"refusing to overwrite vector log: {destination}")
+    chosen = [int(index) for index in indices]
+    if chosen != sorted(set(chosen)):
+        raise ValueError("vector-log subset indices must be unique and increasing")
+    if any(index < 0 or index >= len(source_log) for index in chosen):
+        raise IndexError("vector-log subset index is out of range")
+    if not chosen:
+        raise ValueError("vector-log subset must retain at least one record")
+
+    metric_names = source_log.metric_names
+    if any(name is None for name in metric_names):
+        raise VectorLogError(f"{source} contains an unknown metric id")
+    with VectorLogWriter(
+        destination,
+        tuple(str(name) for name in metric_names),
+        layer_count=source_log.layer_count,
+        feature_count=source_log.feature_count,
+        group_size=source_log.group_size,
+        tokens_per_step=source_log.tokens_per_step,
+        flops_per_token=source_log.flops_per_token,
+    ) as writer:
+        for index in chosen:
+            writer.append(int(source_log.steps[index]), source_log.values[index])
+    return read_vector_log(destination)
+
+
 __all__ = (
     "MAGIC",
     "SUFFIX",
@@ -289,4 +381,6 @@ __all__ = (
     "VectorLogError",
     "VectorLogWriter",
     "read_vector_log",
+    "widening_step_indices",
+    "write_vector_log_subset",
 )

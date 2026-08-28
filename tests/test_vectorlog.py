@@ -87,6 +87,60 @@ class VectorLogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must have shape"):
                 writer.append(1, np.zeros((4, 8), np.float32))
 
+    def test_widening_schedule_keeps_dense_prefix_targets_and_exact_final(self) -> None:
+        steps = np.asarray([1, *range(10, 20_001, 10), 20_007], dtype=np.int32)
+        indices = vectorlog.widening_step_indices(steps)
+
+        self.assertEqual(
+            steps[indices].tolist(),
+            [
+                1,
+                *range(10, 201, 10),
+                300,
+                500,
+                900,
+                1700,
+                3300,
+                6500,
+                12900,
+                20_007,
+            ],
+        )
+
+    def test_widening_schedule_uses_next_real_capture_for_missing_target(self) -> None:
+        steps = np.asarray([1, 50, 100, 150, 200, 350, 550, 950], dtype=np.int32)
+        indices = vectorlog.widening_step_indices(steps)
+
+        np.testing.assert_array_equal(
+            steps[indices], [1, 50, 100, 150, 200, 350, 550, 950]
+        )
+
+    def test_subset_log_preserves_full_vectors_at_selected_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / f"source{vectorlog.SUFFIX}"
+            destination = root / f"lossy{vectorlog.SUFFIX}"
+            values = np.arange(4 * 2 * 8, dtype=np.float32).reshape(4, 2, 8)
+            with vectorlog.VectorLogWriter(
+                source,
+                METRICS,
+                layer_count=2,
+                feature_count=8,
+                group_size=4,
+                tokens_per_step=128,
+                flops_per_token=256.0,
+            ) as writer:
+                for step in (1, 10, 20, 30):
+                    writer.append(step, values + step)
+
+            copied = vectorlog.write_vector_log_subset(source, destination, [0, 2, 3])
+
+            np.testing.assert_array_equal(copied.steps, [1, 20, 30])
+            np.testing.assert_array_equal(copied.values[1], values + 20)
+            self.assertEqual(copied.metric_names, METRICS)
+            with self.assertRaises(FileExistsError):
+                vectorlog.write_vector_log_subset(source, destination, [0])
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

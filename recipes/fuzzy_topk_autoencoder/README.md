@@ -244,11 +244,14 @@ for the complete evidence and limitations.
 
 The versioned
 [`ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json`](ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json)
-reruns only the successful fuzzy arm at the same 60M, 125M, and 250M
-coordinates and paired seeds. Its purpose is mechanism measurement, not a new
-architecture comparison. On optimizer step 1, every 10 steps, and the exact
-final step, every block records four full `H`-feature vectors over the sampled
-global batch of `T=16*8192` tokens:
+and
+[`ablation-sparsity-diagnostics-ladder-500m-3seed.json`](ablation-sparsity-diagnostics-ladder-500m-3seed.json)
+rerun only the successful fuzzy arm at the same 60M, 125M, 250M, and 500M
+coordinates and paired seeds. All twelve runs are complete and verified. Their
+purpose is mechanism measurement, not a new architecture comparison. On
+optimizer step 1, every 10 steps, and the exact final step, every block records
+four full `H`-feature vectors over the sampled global batch of `T=16*8192`
+tokens:
 
 ```text
 winner_frequency[f]     = sum_t 1[i_t = f] / T
@@ -268,13 +271,20 @@ does not imply that its AdamW parameter delta is literally zero: momentum and
 weight decay may still move a parameter with zero current-batch data gradient.
 
 The raw append-only `fuzzy_sparsity.rigvec` tensor is float32 with shape
-`[capture, 4, L, H]`. It retains all neuron identities for offline plots. The
-study browser embeds only derived `[capture, layer]` summaries—batch-dead and
-sampled-never-active fractions, positive-group fraction, within-group winner
-entropy and maximum share, activation-frequency quantiles, and conditional
-activation moments—so opening the browser never downloads gigabytes of raw
-vectors. The browser's raw-log export fetches `.rigvec` files on explicit user
-request.
+`[capture, 4, L, H]`. It retains all neuron identities for offline plots. Each
+archived run also carries an exact full-neuron
+`fuzzy_sparsity_lossy.rigvec`: every recorded capture through step 200, then
+steps 300, 500, 900, 1700, 3300, and so on by doubling the gap, plus the exact
+final capture. This is lossy only along time; no metric, layer, feature, or
+float32 value is reduced at a retained step.
+
+The study browser embeds derived layer summaries plus histograms and positive
+activation-frequency quantiles from those widening-step vectors. Its special
+explorer offers tier, seed, layer, and draggable-step controls; current-batch,
+trailing-ten-capture, and sampled-ever dead definitions; a time ridgeline; a
+selected-step histogram; and layerwise positive-frequency quantiles. The raw
+cadence-ten vectors remain the archive of record and are fetched only on an
+explicit raw-log request.
 
 This logging is sampled densely enough to form a useful temporal dataset while
 keeping the training cost bounded:
@@ -303,19 +313,21 @@ adopted because a logger must not perturb the scientific trajectory; CPU smoke
 controls produce byte-identical training logs and bitwise-identical checkpoint
 arrays with the observer off and on.
 
-At cadence 10, the expected raw-log volumes are:
+At cadence 10, the completed raw-log volumes are:
 
 | tier | captures/run | transfer/capture | raw/run | three seeds |
 |---|---:|---:|---:|---:|
 | 60M (`L=11,H=6,144`) | 233 | 1.03 MiB | 240.28 MiB | 720.84 MiB |
 | 125M (`L=11,H=10,240`) | 467 | 1.72 MiB | 802.66 MiB | 2.35 GiB |
 | 250M (`L=14,H=14,336`) | 942 | 3.06 MiB | 2.82 GiB | 8.45 GiB |
+| 500M (`L=16,H=20,480`) | 1,958 | 5.00 MiB | 9.56 GiB | 28.68 GiB |
 
-The roughly 11.51 GiB total is intentional: raw neuron identities and dense
-temporal coverage are the research product. Before the nine-run queue starts,
-v4-32 short runs compare cadence 0 with the production cadence 10 at identical
-coordinates. The ladder proceeds if the measured cadence-10 excess is at most
-20% of training time and the ordinary optimizer trajectory remains unchanged.
+The 40.19 GiB total is intentional: raw neuron identities and dense temporal
+coverage are the research product. The twelve widening-step companions total
+0.891 GiB. Before launch, v4-32 short runs compared cadence 0 with production
+cadence 10 at identical coordinates. The ladder proceeded only after the
+measured cadence-10 excess remained below 20% and the ordinary optimizer
+trajectory remained unchanged.
 
 The v4-32 gate passed on the isolated-observer implementation:
 
@@ -329,6 +341,28 @@ observer adds 10.26 seconds of one-time compilation at 60M and 14.37 seconds at
 250M; that cost is reported separately from training and amortizes over the
 full 2,316- to 9,402-step runs.
 
+The production rerun is an especially strong trajectory check: all nine
+60M/125M/250M `training.riglog` files are byte-identical to the same-seed fuzzy
+runs sealed in the three-arm study. The observer therefore produced the new
+feature dataset without changing a single recorded optimizer-step loss,
+learning rate, or gradient-norm value.
+
+The mechanism result is not “features never wake up.” Almost every stored
+feature is observed positive by step 1; the remaining few are observed by step
+10. Features become inactive later. At the final step, the fraction inactive
+across the current and previous nine sampled batches averages 34.33%, 35.76%,
+33.87%, and 36.34% over layers and seeds at 60M, 125M, 250M, and 500M. The
+current-batch fractions are only 0.14, 0.02, 0.01, and 0.01 percentage points
+higher, so final inactivity is persistent rather than one-batch noise.
+
+The effect is sharply layer-structured. Block 0 remains almost fully covered;
+block 1 finishes with 69.69%, 77.16%, 83.78%, and 85.62% trailing-window-dead
+features as the tier grows. Later blocks recover activity. In the same block,
+normalized within-group winner entropy falls from 0.424 at 60M to 0.103 at
+500M, while only 1.25% to 0.32% of groups have a positive winner in the final
+sampled batch. The fuzzy quality gain therefore coexists with substantial,
+stable and highly nonuniform dictionary under-use.
+
 ### 500M extension
 
 The versioned
@@ -340,12 +374,11 @@ schedule matches the dense total active matrix FLOPs to 0.00084% after
 whole-step rounding. It stores 1,072,968,960 parameters and reports the
 choicewise backend's 1.6224× issued-compute ratio separately.
 
-Cadence 10 yields 1,958 snapshots and 9.56 GiB of raw vectors per seed, or
-28.68 GiB for seeds 1337–1339. A 120-step seed-1350 feasibility gate checks
-that this first 1.073B-stored-parameter coordinate compiles and fits v4-32;
-the three full seeds start only if both that gate and all nine parent-ladder
-runs complete successfully. The gate is development evidence and is excluded
-from the mechanism dataset archive.
+Cadence 10 yielded 1,958 snapshots and 9.56 GiB of raw vectors per seed, or
+28.68 GiB for seeds 1337–1339. The 120-step seed-1350 feasibility gate passed;
+all three full seeds then completed and verified. Their validation losses are
+3.093102, 3.080546, and 3.100329 (mean 3.091325 ± 0.010010 sample SD). The gate
+is development evidence and is excluded from the mechanism dataset archive.
 
 ## Commands
 
