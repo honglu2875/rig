@@ -329,6 +329,24 @@ observer adds 10.26 seconds of one-time compilation at 60M and 14.37 seconds at
 250M; that cost is reported separately from training and amortizes over the
 full 2,316- to 9,402-step runs.
 
+### 500M extension
+
+The versioned
+[`ablation-sparsity-diagnostics-ladder-500m-3seed.json`](ablation-sparsity-diagnostics-ladder-500m-3seed.json)
+extends the same mechanism dataset to the next dense-equivalent tier. The
+dense anchor is `L=19,D=1,280`; tracing the same full-model active-FLOP
+contract selects fuzzy `L=16,D=1,280,H=20,480,K=5,120`. A 19,561-step fuzzy
+schedule matches the dense total active matrix FLOPs to 0.00084% after
+whole-step rounding. It stores 1,072,968,960 parameters and reports the
+choicewise backend's 1.6224× issued-compute ratio separately.
+
+Cadence 10 yields 1,958 snapshots and 9.56 GiB of raw vectors per seed, or
+28.68 GiB for seeds 1337–1339. A 120-step seed-1350 feasibility gate checks
+that this first 1.073B-stored-parameter coordinate compiles and fits v4-32;
+the three full seeds start only if both that gate and all nine parent-ladder
+runs complete successfully. The gate is development evidence and is excluded
+from the mechanism dataset archive.
+
 ## Commands
 
 CPU wiring and deterministic plan:
