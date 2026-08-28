@@ -16,6 +16,7 @@ from rig import logpack, vectorlog
 from rig.report import (
     DIAGNOSTICS_LOG_NAME,
     FUZZY_SPARSITY_LOG_NAME,
+    FUZZY_SPARSITY_LOSSY_LOG_NAME,
     TRAINING_LOG_NAME,
     ReportError,
     export_study,
@@ -59,10 +60,22 @@ class ReportTests(unittest.TestCase):
             html = (root / "report.html").read_text(encoding="utf-8")
             payload = _payload(html)
 
-        self.assertEqual(len(payload["featureCharts"]), 9)
+        self.assertEqual(len(payload["featureCharts"]), 10)
         self.assertIn('id="feature-charts"', html)
         self.assertIn("...(D.featureCharts||[])", html)
+        self.assertIn('id="fuzzy-explorer"', html)
+        self.assertIn("function drawFuzzyRidge()", html)
         self.assertIn(FUZZY_SPARSITY_LOG_NAME, payload["runs"][0]["riglogs"])
+        explorer = payload["fuzzyExplorer"]
+        self.assertEqual(explorer["runs"][0]["steps"], [1, 2])
+        self.assertEqual(len(explorer["runs"][0]["recentDeadFraction"]), 2)
+        self.assertEqual(
+            explorer["quantileProbabilities"], [0.1, 0.25, 0.5, 0.75, 0.9, 0.99]
+        )
+        self.assertEqual(
+            sum(explorer["runs"][0]["activationFrequencyHistograms"][0][0]),
+            8,
+        )
         sampled_dead = next(
             chart
             for chart in payload["featureCharts"]
@@ -826,13 +839,63 @@ class StudyExportTests(unittest.TestCase):
                 _write_fuzzy_sparsity(run / FUZZY_SPARSITY_LOG_NAME)
 
             summary = export_study(runs, root / "out", "demo")
-            folders = sorted(path for path in summary["path"].iterdir() if path.is_dir())
+            folders = sorted(
+                path for path in summary["path"].iterdir() if path.is_dir()
+            )
             copied = [
                 (folder / FUZZY_SPARSITY_LOG_NAME).is_file() for folder in folders
             ]
 
         self.assertEqual(len(folders), 2)
         self.assertTrue(all(copied))
+
+    def test_large_vector_export_can_hardlink_raw_and_add_lossy_companion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            for run in sorted(path for path in runs.iterdir() if path.is_dir()):
+                result_path = run / "result.json"
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                result["artifacts"]["fuzzy_sparsity"] = FUZZY_SPARSITY_LOG_NAME
+                result["contract"]["model"] = {
+                    "layers": 2,
+                    "d_model": 2,
+                    "mlp_mult": 4,
+                    "mlp_top_k": 4,
+                }
+                result_path.write_text(json.dumps(result), encoding="utf-8")
+                _write_fuzzy_sparsity(run / FUZZY_SPARSITY_LOG_NAME)
+
+            summary = export_study(
+                runs,
+                root / "out",
+                "demo",
+                link_artifacts=True,
+                lossy_fuzzy=True,
+            )
+            folders = sorted(
+                path for path in summary["path"].iterdir() if path.is_dir()
+            )
+            source = sorted(path for path in runs.iterdir() if path.is_dir())[0]
+            raw = folders[0] / FUZZY_SPARSITY_LOG_NAME
+            source_inode = source.joinpath(FUZZY_SPARSITY_LOG_NAME).stat().st_ino
+            raw_inode = raw.stat().st_ino
+            lossy = vectorlog.read_vector_log(
+                folders[0] / FUZZY_SPARSITY_LOSSY_LOG_NAME
+            )
+            lossy_steps = lossy.steps.copy()
+            payload = json.loads(
+                gzip.decompress((summary["path"] / "full.json.gz").read_bytes())
+            )
+
+        self.assertEqual(source_inode, raw_inode)
+        np.testing.assert_array_equal(lossy_steps, [1, 2])
+        self.assertGreater(summary["lossy_bytes"], 0)
+        self.assertEqual(len(payload["fuzzyExplorer"]["runs"]), 2)
+        self.assertIn(
+            FUZZY_SPARSITY_LOSSY_LOG_NAME,
+            payload["runs"][0]["riglogs"],
+        )
 
     def test_a_routed_run_does_not_overwrite_the_dense_run_beside_it(self) -> None:
         """Routing is not one of the coordinates the name is built from.
@@ -936,9 +999,7 @@ class StudyExportTests(unittest.TestCase):
                 payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
                 payload["seed"] = 1350
                 payload["contract"]["model"] = model
-                (run / "result.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
             summary = export_study(runs, root / "out", "demo")
             folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
@@ -992,17 +1053,13 @@ class StudyExportTests(unittest.TestCase):
                 (0.5, 1.0),
                 strict=True,
             ):
-                payload = json.loads(
-                    (run / "result.json").read_text(encoding="utf-8")
-                )
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
                 payload["seed"] = 1350
                 payload["metrics"]["experts"] = 8
                 payload["implementation"] = {
                     "expert_load_scaling": {"mode": mode, "strength": strength}
                 }
-                (run / "result.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
             summary = export_study(runs, root / "out", "demo")
             folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
@@ -1027,17 +1084,13 @@ class StudyExportTests(unittest.TestCase):
                 (0, 2),
                 strict=True,
             ):
-                payload = json.loads(
-                    (run / "result.json").read_text(encoding="utf-8")
-                )
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
                 payload["seed"] = 1350
                 payload["metrics"]["experts"] = 8
                 payload["implementation"] = {
                     "local_moe_optimization": {"steps": local_steps}
                 }
-                (run / "result.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
             summary = export_study(runs, root / "out", "demo")
             folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
@@ -1062,9 +1115,7 @@ class StudyExportTests(unittest.TestCase):
                 (0.1, 0.3),
                 strict=True,
             ):
-                payload = json.loads(
-                    (run / "result.json").read_text(encoding="utf-8")
-                )
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
                 payload["seed"] = 1337
                 payload["metrics"]["experts"] = 8
                 payload["implementation"] = {
@@ -1072,9 +1123,7 @@ class StudyExportTests(unittest.TestCase):
                         "resolved": {"optimizer": {"weight_decay": decay}}
                     }
                 }
-                (run / "result.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
             summary = export_study(runs, root / "out", "demo")
             folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
@@ -1095,9 +1144,7 @@ class StudyExportTests(unittest.TestCase):
             second = sorted(p for p in runs.iterdir() if p.is_dir())[1]
             payload = json.loads((second / "result.json").read_text(encoding="utf-8"))
             payload["seed"] = 1337
-            (second / "result.json").write_text(
-                json.dumps(payload), encoding="utf-8"
-            )
+            (second / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
             with self.assertRaisesRegex(ReportError, "collides"):
                 export_study(runs, root / "out", "demo")
@@ -1177,7 +1224,9 @@ class StudyExportTests(unittest.TestCase):
             path = summary["path"]
             exported_records = [
                 json.loads(line)
-                for line in (path / "records.jsonl").read_text(encoding="utf-8").splitlines()
+                for line in (path / "records.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
             ]
             snapshot = json.loads(
                 gzip.decompress((path / "snapshot.json.gz").read_bytes())

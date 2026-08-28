@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-sparsity-diagnostics-ladder-60m-125m-250m-3seed",
-  "status": "throughput_gate_accepted_ready_to_launch",
+  "status": "sealed_9_runs_complete_verified",
   "objective": "Measure full per-feature winner and positive-activation behavior across the completed fuzzy TopK ladder without changing its model, optimizer, data order, or learning horizon.",
   "hypotheses": {
     "dead_features": "The 16D dictionary does not obtain its quality gain by leaving a large, persistent population of features inactive.",
@@ -64,7 +64,7 @@
     },
     "gradient_interpretation": "Positive activation frequency gives current-batch structural data-gradient support for the corresponding UP column and DOWN row. Adam momentum and weight decay can still produce a dense parameter delta.",
     "runtime_isolation": "Non-capture steps use the ordinary executable. Capture steps run a stateless forward-only observer before invoking the exact same ordinary/model-diagnostic update executable; this repeats one forward at 10% cadence but cannot alter update numerics. The observer reductions share its four choicewise decoder passes, only the controller transfers the result, and the growing file remains a dotted temporary excluded from periodic salvage rsync until one successful atomic rename.",
-    "browser_policy": "Keep raw neuron vectors only in the downloadable rigvec artifact; embed compact capture-by-layer reductions in snapshot.json.gz and full.json.gz."
+    "browser_policy": "Publish the cadence-10 raw vectors as the authoritative artifacts, exact full-neuron widening-step companions at 1, 10, ..., 200, 300, 500, 900, 1700, ... and final, compact layer reductions, and precomputed activation-frequency histograms/positive quantiles for the one-off study-browser explorer."
   },
   "throughput_gate": {
     "accelerator": "v4-32",
@@ -188,6 +188,62 @@
         "9402"
       ]
     }
+  },
+  "run_ids": {
+    "60m": {
+      "1337": "20260828T010014.076667Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1337-910ebbcc",
+      "1338": "20260828T010720.730293Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1338-cdd37f5b",
+      "1339": "20260828T011428.636932Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1339-7f8b426f"
+    },
+    "125m": {
+      "1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+      "1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+      "1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79"
+    },
+    "250m": {
+      "1337": "20260828T022449.453967Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1337-9dc93f5a",
+      "1338": "20260828T034154.231319Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1338-ba68b1be",
+      "1339": "20260828T045900.979160Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1339-f826e264"
+    }
+  },
+  "results": {
+    "60m": {
+      "validation_loss_by_seed": {
+        "1337": 3.9218744337558746,
+        "1338": 3.9359951615333557,
+        "1339": 3.9170133471488953
+      },
+      "mean": 3.9249609808127084,
+      "sample_sd": 0.009860141930117685,
+      "mean_final_trailing_10_capture_dead_fraction": 0.34330610275151513
+    },
+    "125m": {
+      "validation_loss_by_seed": {
+        "1337": 3.591915398836136,
+        "1338": 3.581060439348221,
+        "1339": 3.584172636270523
+      },
+      "mean": 3.5857161581516266,
+      "sample_sd": 0.005589667362120325,
+      "mean_final_trailing_10_capture_dead_fraction": 0.35761422983939395
+    },
+    "250m": {
+      "validation_loss_by_seed": {
+        "1337": 3.314135879278183,
+        "1338": 3.3040049374103546,
+        "1339": 3.306984007358551
+      },
+      "mean": 3.3083749413490295,
+      "sample_sd": 0.0052067282247809715,
+      "mean_final_trailing_10_capture_dead_fraction": 0.3386662356904762
+    }
+  },
+  "trajectory_check": "All nine training.riglog files are byte-identical to their same-tier, same-seed uninstrumented fuzzy runs in the sealed three-arm ladder.",
+  "archive": {
+    "study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "raw_rigvec_bytes": 12355849968,
+    "lossy_rigvec_bytes": 500073924,
+    "status": "combined with the 500M extension in one 12-run Hugging Face study"
   },
   "launch_policy": "After the throughput gate and standard v4-32 preflights pass, launch all nine cells sequentially at explicit sparsity-diagnostics cadence 10 in 60M, 125M, 250M order and increasing seed within tier. Do not retry, select, or stop based on intermediate loss or sparsity observations.",
   "stopping_rule": "Every admitted cell runs through its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",

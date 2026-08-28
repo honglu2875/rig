@@ -9,6 +9,7 @@
 :root{--bg:#080b12;--panel:#101521;--panel2:#151b29;--line:#273247;--text:#edf4ff;--muted:#91a0b8;--accent:#7dd3fc;--good:#86efac;--warn:#fde047;--bad:#fca5a5;--radius:14px;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:var(--bg);font-synthesis:none}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% -10%,#17233a 0,transparent 35rem),var(--bg);min-height:100vh}button,input{font:inherit}.shell{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;overflow:auto;border-right:1px solid var(--line);background:rgba(10,14,23,.94);backdrop-filter:blur(16px);padding:20px}.brand{font-weight:800;letter-spacing:.02em;font-size:17px}.brand b{color:var(--accent)}.subtle{color:var(--muted);font-size:12px;line-height:1.5}.side-actions{display:flex;gap:7px;margin:18px 0 10px}.ghost{border:1px solid var(--line);color:var(--muted);background:var(--panel);border-radius:8px;padding:6px 9px;cursor:pointer}.ghost:hover{color:var(--text);border-color:#41516d}.search{width:100%;border:1px solid var(--line);background:#090d16;color:var(--text);padding:9px 10px;border-radius:9px;outline:none}.search:focus{border-color:var(--accent)}.run-list{display:grid;gap:7px;margin-top:12px}.run-toggle{display:grid;grid-template-columns:auto 10px 1fr;gap:9px;align-items:start;padding:9px;border:1px solid transparent;border-radius:10px;cursor:pointer}.run-toggle:hover{background:var(--panel);border-color:var(--line)}.run-toggle input{margin-top:3px;accent-color:var(--accent)}.dot{width:9px;height:9px;border-radius:50%;margin-top:4px;box-shadow:0 0 14px currentColor}.run-name{font-size:12px;font-weight:650;overflow-wrap:anywhere}.run-meta{display:block;color:var(--muted);font-size:10px;margin-top:3px}.main{min-width:0;padding:26px 28px 60px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:20px}.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:750}.top h1{font-size:clamp(25px,3vw,42px);letter-spacing:-.04em;margin:5px 0 7px}.stats{display:flex;gap:8px;flex-wrap:wrap}.pill{border:1px solid var(--line);background:rgba(16,21,33,.8);border-radius:999px;padding:7px 10px;color:var(--muted);font-size:12px}.pill strong{color:var(--text)}.axis-control{flex:none;border:1px solid var(--line);border-radius:11px;padding:4px;background:#090d16;display:flex}.axis-control label{cursor:pointer}.axis-control input{position:absolute;opacity:0;pointer-events:none}.axis-control span{display:block;padding:8px 11px;border-radius:7px;color:var(--muted);font-size:12px;font-weight:700}.axis-control input:checked+span{background:var(--panel2);color:var(--text);box-shadow:0 1px 5px #0008}.axis-hint{text-align:right;color:var(--muted);font-size:10px;margin-top:6px}.export-row{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:9px}.export-status{font-size:10px;color:var(--muted);text-align:right;max-width:250px;overflow-wrap:anywhere}.export-status.bad{color:var(--bad)}.ghost[disabled]{opacity:.55;cursor:progress}.notice-wrap{display:grid;gap:7px;margin:0 0 16px}.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}.fold>summary::-webkit-details-marker{display:none}.fold>summary::before{content:'\25B8';font-size:9px;color:var(--accent)}.fold[open]>summary::before{content:'\25BE'}.fold>summary:hover{color:var(--text)}.fold-count{color:var(--muted);font-weight:400}.notice{padding:10px 12px;border:1px solid #3d3940;background:#18161c;color:#c6b9c6;border-radius:10px;font-size:12px}.section-title{margin:30px 0 12px;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,410px),1fr));gap:12px}.chart{background:linear-gradient(145deg,rgba(20,27,42,.92),rgba(12,17,27,.92));border:1px solid var(--line);border-radius:var(--radius);padding:15px;min-width:0}.chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}.chart h2{font-size:14px;margin:0;letter-spacing:-.01em}.chart-unit{color:var(--muted);font-size:10px}.canvas-wrap{height:270px;position:relative}.chart canvas{display:block;width:100%;height:100%;touch-action:none}.tooltip{position:fixed;z-index:20;pointer-events:none;background:#070a11ec;border:1px solid #36435b;border-radius:8px;padding:7px 9px;box-shadow:0 12px 30px #000a;font-size:11px;line-height:1.45;display:none;max-width:270px}.empty{border:1px dashed var(--line);border-radius:var(--radius);padding:30px;color:var(--muted);text-align:center}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}th,td{text-align:right;padding:10px 12px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em}th:first-child,td:first-child{text-align:left}tbody tr:last-child td{border-bottom:0}.status{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.footer{color:var(--muted);font-size:11px;margin-top:26px}.mobile-runs{display:none}.skip details{color:var(--muted);font-size:12px}.skip summary{cursor:pointer}.skip code{color:var(--bad);white-space:normal;overflow-wrap:anywhere}@media(max-width:850px){.shell{grid-template-columns:1fr}.sidebar{display:none;position:fixed;z-index:30;width:min(88vw,320px);box-shadow:20px 0 70px #000;height:100vh}.sidebar.open{display:block}.main{padding:20px 14px 50px}.mobile-runs{display:inline-flex}.top{align-items:stretch;flex-direction:column}.axis-control{align-self:flex-start}.axis-hint{text-align:left}.export-row{justify-content:flex-start}.export-status{text-align:left}.canvas-wrap{height:240px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .analysis-controls{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:12px;padding:10px 12px;margin:0 0 18px}.control-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.smoothing-control{border:1px solid var(--line);border-radius:9px;padding:3px;background:#070b13;display:flex;flex-wrap:wrap}.smoothing-control label{cursor:pointer}.smoothing-control input{position:absolute;opacity:0;pointer-events:none}.smoothing-control span{display:block;padding:6px 9px;border-radius:6px;color:var(--muted);font-size:11px;font-weight:700}.smoothing-control input:checked+span{background:var(--panel2);color:var(--text);box-shadow:0 1px 4px #0008}.smooth-level{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;font-weight:700}.smooth-level input{width:76px;border:1px solid var(--line);border-radius:7px;background:#070b13;color:var(--text);padding:6px 7px;outline:none}.smooth-level input:focus{border-color:var(--accent)}.smooth-level input:disabled{opacity:.45}.smoothing-hint{flex:1 1 100%;color:var(--muted);font-size:10px;line-height:1.45}.chart-head{align-items:center}.chart-tools{display:flex;align-items:center;gap:5px}.icon-button{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:7px;padding:4px 7px;cursor:pointer;line-height:1}.icon-button:hover,.icon-button:focus-visible{border-color:var(--line);color:var(--text);outline:none}.chart canvas{cursor:crosshair}.chart canvas.dragging{cursor:crosshair}.chart.family-hidden{display:none}.family-control{display:flex;gap:5px;margin:12px 0;flex-wrap:wrap}.family-control button{border:1px solid var(--line);background:#090d16;color:var(--muted);border-radius:8px;padding:7px 11px;cursor:pointer;font-weight:700;font-size:12px}.family-control button.active{background:var(--panel2);color:var(--text);border-color:#49617f}.tooltip{z-index:60}.focus-dialog{width:min(96vw,1500px);height:min(94vh,980px);padding:0;border:1px solid #43516a;border-radius:16px;background:var(--panel);color:var(--text);box-shadow:0 30px 100px #000d}.focus-dialog::backdrop{background:#03050ae8;backdrop-filter:blur(4px)}.focus-shell{height:100%;display:flex;flex-direction:column;padding:16px}.focus-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.focus-head h2{font-size:17px;margin:0}.focus-canvas{flex:1;min-height:0;margin-top:8px}.focus-canvas canvas{display:block;width:100%;height:100%;touch-action:none;cursor:crosshair}.interaction-hint{color:var(--muted);font-size:10px;margin-top:7px}.layer-step{display:flex;align-items:center;gap:11px;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:11px;padding:9px 12px;margin:0 0 12px}.layer-step label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.layer-step input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}.layer-step output{font:11px ui-monospace,monospace;color:var(--text);min-width:9ch;text-align:right}@media(max-width:850px){.focus-dialog{width:100vw;height:100vh;max-width:none;max-height:none;border-radius:0}.analysis-controls{align-items:flex-start}.smoothing-control{width:100%}.smoothing-control label{flex:1;text-align:center}}
+.fuzzy-explorer{margin-top:28px}.fuzzy-explorer-note{color:var(--muted);font-size:11px;line-height:1.55;margin:-5px 0 12px}.fuzzy-explorer-controls{display:flex;align-items:end;gap:10px 14px;flex-wrap:wrap;border:1px solid var(--line);background:rgba(9,13,22,.82);border-radius:12px;padding:11px 12px;margin-bottom:12px}.fuzzy-control{display:grid;gap:5px;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}.fuzzy-control select{min-width:105px;border:1px solid var(--line);border-radius:8px;background:#070b13;color:var(--text);padding:7px 9px;outline:none}.fuzzy-control select:focus{border-color:var(--accent)}.fuzzy-step{flex:1 1 280px}.fuzzy-step-row{display:flex;align-items:center;gap:9px}.fuzzy-step input{flex:1;min-width:150px;accent-color:var(--accent)}.fuzzy-step output{min-width:9ch;text-align:right;color:var(--text);font:11px ui-monospace,monospace;letter-spacing:0;text-transform:none}.fuzzy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.fuzzy-card{background:linear-gradient(145deg,rgba(20,27,42,.92),rgba(12,17,27,.92));border:1px solid var(--line);border-radius:var(--radius);padding:15px;min-width:0}.fuzzy-card h2{font-size:14px;margin:0}.fuzzy-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:5px}.fuzzy-card-head select{border:1px solid var(--line);border-radius:7px;background:#070b13;color:var(--text);padding:5px 7px;font-size:10px}.fuzzy-card p{color:var(--muted);font-size:10px;line-height:1.45;margin:0 0 7px}.fuzzy-canvas{height:310px}.fuzzy-canvas canvas{display:block;width:100%;height:100%}.fuzzy-readout{color:var(--muted);font:10px ui-monospace,monospace;margin-top:5px;min-height:1.4em}.fuzzy-wide{grid-column:1/-1}@media(max-width:900px){.fuzzy-grid{grid-template-columns:1fr}.fuzzy-wide{grid-column:auto}.fuzzy-canvas{height:270px}}
 .study-picker{position:fixed;inset:0;background:var(--bg);overflow:auto;z-index:50;padding:38px 22px}
 .study-inner{max-width:1000px;margin:0 auto}
 .study-title{font-size:26px;margin:0 0 6px}
@@ -51,7 +52,7 @@
 <main class="main">
   <div class="top">
     <div><div class="eyebrow">Static performance dossier</div><h1>Training, at a glance.</h1><div class="stats" id="stats"></div></div>
-    <div><button class="ghost mobile-runs" id="open-runs">Choose runs</button><div class="axis-control" role="radiogroup" aria-label="Time-series x-axis"><label><input type="radio" name="axis" value="flops" checked><span>equi-FLOP</span></label><label><input type="radio" name="axis" value="step"><span>equi-step</span></label></div><div class="axis-hint" id="axis-hint">Estimated cumulative FLOPs</div><div class="export-row"><button class="ghost" id="export-runs" type="button">Export selection</button><button class="ghost" id="export-riglogs" type="button" hidden>Export .riglogs</button><span class="export-status" id="export-status" role="status" aria-live="polite"></span></div></div>
+    <div><button class="ghost mobile-runs" id="open-runs">Choose runs</button><div class="axis-control" role="radiogroup" aria-label="Time-series x-axis"><label><input type="radio" name="axis" value="flops" checked><span>equi-FLOP</span></label><label><input type="radio" name="axis" value="step"><span>equi-step</span></label></div><div class="axis-hint" id="axis-hint">Estimated cumulative FLOPs</div><div class="export-row"><button class="ghost" id="export-runs" type="button">Export selection</button><button class="ghost" id="export-riglogs" type="button" hidden>Export raw logs</button><span class="export-status" id="export-status" role="status" aria-live="polite"></span></div></div>
   </div>
   <div class="analysis-controls" aria-label="Scientific chart controls">
     <span class="control-title">Timeline x scale</span>
@@ -85,6 +86,42 @@
     <button class="ghost" id="layer-step-last" type="button">Last</button>
   </div>
   <div class="charts" id="layer-charts"></div>
+  <div class="section-title">Fuzzy TopK feature activity · sampled global batches, one vector per block</div>
+  <div class="charts" id="feature-charts"></div>
+  <section class="fuzzy-explorer" id="fuzzy-explorer" hidden>
+    <div class="section-title">Fuzzy TopK latent-distribution explorer · widening-step lossless vectors</div>
+    <p class="fuzzy-explorer-note" id="fuzzy-explorer-note"></p>
+    <div class="fuzzy-explorer-controls">
+      <label class="fuzzy-control">Model size<select id="fuzzy-tier"></select></label>
+      <label class="fuzzy-control">Seed<select id="fuzzy-seed"></select></label>
+      <label class="fuzzy-control">Layer<select id="fuzzy-layer"></select></label>
+      <label class="fuzzy-control fuzzy-step">Training step<span class="fuzzy-step-row"><input id="fuzzy-step" type="range" min="0" max="0" step="1" value="0"><output id="fuzzy-step-value">—</output></span></label>
+    </div>
+    <div class="fuzzy-grid">
+      <article class="fuzzy-card fuzzy-wide">
+        <div class="fuzzy-card-head"><h2>Dead latent fraction by layer over training</h2><select id="fuzzy-dead-kind" aria-label="Dead latent definition"><option value="batch">Inactive in current sampled batch</option><option value="recent">Inactive in trailing 10 sampled batches</option><option value="sampled">Never active in any sampled batch so far</option></select></div>
+        <p>Heatmap columns follow optimizer step on a logarithmic axis; color is the fraction of stored latents meeting the selected zero-activity definition.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-dead-canvas" aria-label="Dead latent fraction by layer and training step"></canvas></div>
+        <div class="fuzzy-readout" id="fuzzy-dead-readout"></div>
+      </article>
+      <article class="fuzzy-card">
+        <div class="fuzzy-card-head"><h2>Activation-frequency ridgeline over time</h2></div>
+        <p>One normalized ridge per retained step for the selected layer. The leftmost point is exactly-zero frequency; positive frequencies use log10 bins.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-ridge-canvas" aria-label="Activation frequency ridgeline over training"></canvas></div>
+      </article>
+      <article class="fuzzy-card">
+        <div class="fuzzy-card-head"><h2>Activation-frequency histogram at selected step</h2></div>
+        <p>Fraction of stored latents in the selected layer. Drag the training-step control above; zero is separate from the log-binned positive tail.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-hist-canvas" aria-label="Activation frequency histogram at selected training step"></canvas></div>
+        <div class="fuzzy-readout" id="fuzzy-hist-readout"></div>
+      </article>
+      <article class="fuzzy-card fuzzy-wide">
+        <div class="fuzzy-card-head"><h2>Positive activation-frequency quantiles by layer</h2></div>
+        <p>Quantiles are conditional on activation frequency being strictly positive in the sampled global batch; the y-axis is logarithmic.</p>
+        <div class="fuzzy-canvas"><canvas id="fuzzy-quantile-canvas" aria-label="Positive activation frequency quantiles by layer"></canvas></div>
+      </article>
+    </div>
+  </section>
   <details class="fold" id="notices-fold" hidden>
     <summary class="section-title fold-head">Notices <span class="fold-count" id="notices-count"></span></summary>
     <div class="notice-wrap" id="notices"></div>
@@ -101,7 +138,7 @@
     <div class="focus-canvas"><canvas id="focus-canvas"></canvas></div>
   </div>
 </dialog>
-<script type="application/gzip-base64" id="report-data">H4sIAAAAAAACA5WWy27jNhSGX4XQtlbDi0hR3k3baRdN0GASoAWCWdASbRORRA9FTW7Ic8yjdN++WA8l2ZaU2IPuTB6a/PSf/xzyJaq0V9HyJdroWjvldfHBR8uIYipiLGOa3lKyTOgSix+ppJlMf8B4iXG0iEydl22hi2iJF1Fzb3a74Xeh16ot/V8fHk0DW61Lu2ui4/RNrkoN86XdwGwXvVQrXcLUx8abKjCgvK3aUnnzVaNfL/+4Dv+v1OPPW+X8tTW1h41JgsPBlbV+a+rNlXq8UdWu1IfQztm16Y6y67XJjSqj10XkdGW9Dl/s9M5C8EsL+5n8wplNDEzhqMa3hQkb3b1EtarCFivl823cPGi9iwW+gkXe+G7zn0IE/fsNXX5CyqN9UDuI9QPX1rBXymHjWu2arQWFQUrJKahi1Ka28N05LGEcNKYSVGlL0INjQrMswa+LA0bp4jEJofwMyiHasQyjHoamYxhCRJrIGQzeY1CJgSQVI4wxA+Xn5DhEO4Zh1DMwMWHgXKYnGUSapTTj6QkGjs8xhOgC+QeLVm2x0b45Ag1/7IEIHQNJTN/wENAh5WJPRZjEmDBGphnyTtXNWru5NJdauRqsikKd7cVZIIYarYvmhEpTKE6ZTE8miuOMZJhNaXqF5P3Mtm9g5D3Kbe31o5/4F/3zN4SOOBMXCyz46ZyxlCQpHdFUVscjohHNJ9uGspf3S+QteArZNZJIP+60G6cLeC6CjwPUlf14pJJjqkQIQtgMiyeUAtEhdUkqMy7lW0OZZx1vnCmmgL2lQrDXaoEKXTcwqAvkOvj3KUfSJZNMigRnnMz9RbhIwroBEjMh04SPIINV4q/KGVXnepbSG4ihfWzoRYNM03yOpUvIpAoxS3hGTrcCgrNUkJNAs4b0hqiTZYL0Xjrp1PMZTSg+hcSwYAwyOUIqWvC0sXWsVmX/Y6rTL0McNXAVhRJ4p20HJIrR7fX1kWqiVEYYIQcIRjOR4ewsxEyb9yjeduzvczAh2LFNSuhJ2bzmahuvjGrm1Q+5CdNoT4jW1r3xS+fki9CSzhcdZ5gn/CAI4WnGaDID6SrFxap9nKvRNQCHIGJKo9wTXMVNAw1Jd1e3rv15x0y6EqFw9rENZSKhhM1I+tYCp6giHhIwR/p4XILsDl4mUPxun63/hcOhEe5xMrhJU8FnOA/abLY+LnSunkYIHwpV/Yn6IOqCSOUuKOO3OpyISlUUgPHdDjm9bKWA9nNwTUJkAvYVM6ZNW8GzDL4fvniuzW99rO98qFvS4Qw6dXY6L9HEPIyGe/R4rUI1pdnYPM1OuUaDcbzVdW7hk2P9Jbwd5y2wW4du7e53dHV5HWpKf2kBTpUb64zfViY/vChH1b7RFh7C7ilQ9mcdbc6mDVKObC4wS7EY9551+/z8FMMddh/7rdOA7Kp4lKSh9sPdsUDd4g520V0khW1XpY676TNFOAOkyQSQiZQfpKRwB0tM+Ovn1/3yu89h50p3j+lhfGyt49lSPWk3nqgtrNDD4PDkv/v8+h+UK0VIRwwAAA==</script>
+<script type="application/gzip-base64" id="report-data">H4sIAAAAAAACA5WXy47bNhSGX4XQtlaHF5GivEvbpIvOoIMkQAsEWXAk2iZGEj0UlblhnqOP0n37Yj2UZFuSL0F3Fg9FfvrPfw7p16jSXkXL12ita+2U18U7Hy0jiqmIsYyp/EzZkpElFz+STIiM/YDxEuNoEZk6L9tCF9ESL6Lm3my3w+9Cr1Rb+j/fPZkGllqVdttEh+FPuSo1jJd2DaNd9Frd6RKG3jfeVIEB5W3Vlsqbbxp9uP79NrxfqaefN8r5W2tqDwuTBIeNK2v9xtTrG/X0SVXbUu9DW2dXptvKrlYmN6qM3haR05X1Onyx01sLwYcW1jP5lTPrGJjCVo1vCxMW+vIa1aoKS9wpn2/i5lHrbSzwDUzyxneL/xQi6N+/0PVHpDzaBbWDWP/g2hrWSjksXKtts7GgMM2k5BRUMWpdW/juHKYwTiWlElRpS9CDY0KzLMFviz1G6eIxCaH8Aso+2rEMTz0MTccwhIg0kTMYvMOgEgNJKkYYYwbKL8mxj3YMw1PPwMSEgXOZnmUQaZbSjKdnGDi+xBCiC+QfLbpri7X2zQFoeLEHInQMJDE94iGgQ8rFjoowiTFhjEwz5J2qm5V2c2mutXI1WBWFOtuJs0AMNVoXzRmVplCcMpmeTRTHGckwm9L0Csn7mW2PYOQ9ym3t9ZOf+Bf98zeEDjgTFwss+PmcsZQkKR3RVFbHI6IRzUfbhrKX90vkLXgK2RWSSD9ttRunC3iugo8D1I19f6CSY6pECELYDIsnlALRPnVJKjMu5bGhzIuO184UU8DeUiHYa7VAha4beKgL5Dr405Qj6ZJJJkWCM07m/iJcJGHeAImZkGnCR5DBKvE35Yyqcz1L6SeIoV1s6EWDTNN8jqVLyKQKMUt4Rs63AoKzVJCzQLOGdETUyTJBOpVOOvV8RhOKzyExLBiDTI6QihY8bWwdq7uy/zHV6Zchjho4ikIJnGjbAYli9Pn29kA1USojjJA9BKOZyHB2EWKmzSmK4479fQ4mBDu0SQk9KZvXXG3jO6OaefVDbsIw2hGilXVHfumcfBVa0uWi4wzzhO8FITzNGE1mIF2luFi1T3M1ugbgEERMaZR7hqO4aaAh6e7o1rW/7JhJVyIU9j60oUwklLAZSd9aYBdVxEMC5kjvD1OQ3cLNBIrf7bL1v3A4NMIdTgYnaSr4DOdRm/XGx4XO1fMI4V2hqj9QH0RdEKncBWX8RocdUamKAjC+2yGnh60U0H72rkmITMC+Ysa0biu4lsH3wxfPtfm1j/WdD3VTOpxBp85OlyWamIfRcI4ejlWopjQbm6fZKtdoMI63us4tfHKsH8Ldcd4Cu3nos93+hm6ub0NN6YcW4FS5ts74TWXy/Y1yVO1rbeEi7J4DZb/XweZs2iDlyOYCsxSLce9ZtS8vzzGcYfex3zgNyK6KR0kaaj+cHQvUTe5gF91BUtj2rtRxN3yhCGeANJkAMpHyvZQUzmCJCT9N2C1k/HM8aq3HsB/2lOA2D6UIHoSbOby3M2PTXelPA1+FK9YpWSc9PkkzisnhmIE7FYY29vVtN/3L17B8pbu/AMPzgXo8Wqpn7cYDK6186yZvdhpAfZfWBeIadl1EtYWV9DBj/4fmy9e3/wCCQEfHJQ0AAA==</script>
 <script>
 (()=>{'use strict';
 let D, runMap, visible, cameFromPicker=false;
@@ -227,6 +264,7 @@ async function loadPayload(){
  return payload.remote?chooseStudy(payload.remote):payload}
 const smoothCache=new WeakMap();
 let axis='flops', xScale='log', family='grad', smoothing='raw', charts=[], frame=0, focusItem=null, fullCacheStatus=null;
+let fuzzyRun=null,fuzzyStepIndex=0,fuzzyResizeObserver=null;
 // hoverX follows the pointer, pinnedX survives until clicked again, layerStep
 // is the snapshot the layer charts show. All three are in step space, which is
 // axis-independent, so they stay put when the x axis switches to FLOPs.
@@ -245,7 +283,7 @@ function init(){
  $('notices').innerHTML=D.notices.map(n=>`<div class="notice">${esc(n)}</div>`).join('');
  $('notices-count').textContent=D.notices.length?'('+D.notices.length+')':'';
  $('notices-fold').hidden=!D.notices.length;
- buildRuns(); buildSummary(); buildCharts(); buildSkipped(); updateSmoothingControls(true); updateAxisHint();
+ buildRuns(); buildSummary(); buildCharts(); buildFuzzyExplorer(); buildSkipped(); updateSmoothingControls(true); updateAxisHint();
  if(cameFromPicker){
   const back=document.createElement('button');
   back.className='ghost';back.id='back-to-studies';back.textContent='← All studies';
@@ -282,10 +320,73 @@ function hw(r){
 function buildRuns(){$('run-list').innerHTML=D.runs.map(r=>`<label class="run-toggle" data-search="${esc((r.label+' '+r.id+' '+r.classification+' '+(r.chip||'')).toLowerCase())}"><input type="checkbox" data-run="${esc(r.id)}" ${r.selected?'checked':''}><span class="dot" style="color:${r.color};background:${r.color}"></span><span class="run-name">${esc(r.label)}<small class="run-meta">${esc(r.classification)} · step ${fmt(r.finalStep,0)} · val ${fmt(r.validationLoss,4)}${hw(r)}${r.ledger?' · ledger ✓':' · unledgered'}</small></span></label>`).join('')||'<p class="subtle">No plot-able runs found.</p>';document.querySelectorAll('[data-run]').forEach(x=>x.onchange=()=>{x.checked?visible.add(x.dataset.run):visible.delete(x.dataset.run);resetViews();buildLayerSteps();schedule()})}
 function syncChecks(){document.querySelectorAll('[data-run]').forEach(x=>x.checked=visible.has(x.dataset.run))}
 function buildSummary(){if(!D.runs.length){$('summary').innerHTML='<div class="empty">No eligible run passed the report completeness, profile, and qualification checks.</div>';return}$('summary').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Run</th><th>Class</th><th>Steps</th><th>Tokens</th><th>Train s</th><th>Train loss</th><th>Val loss</th><th>Fresh10</th><th>FLOP x</th><th>Final scopes</th></tr></thead><tbody>${D.runs.map(r=>`<tr><td><span class="status" style="background:${r.color}"></span>${esc(r.label)}</td><td>${esc(r.classification)}</td><td>${fmt(r.finalStep,0)}</td><td>${fmt(r.tokens,0)}</td><td>${fmt(r.trainSeconds,2)}</td><td>${fmt(r.trainLoss,4)}</td><td>${fmt(r.validationLoss,4)}</td><td>${fmt(r.fresh10Loss,4)}</td><td title="${esc(r.flopSource)}">${r.flopSource.startsWith('derived:')?'derived':'logged'}</td><td>${r.hasLayerStats?'yes':'—'}</td></tr>`).join('')}</tbody></table></div>`}
-function buildCharts(){charts=[];makeGroup($('time-charts'),D.timeCharts,'time');makeGroup($('diagnostic-charts'),D.diagnosticCharts,'time');makeGroup($('layer-charts'),D.layerCharts,'layer');buildLayerSteps();buildFamilies();if(!D.diagnosticCharts.length)$('diagnostic-charts').innerHTML='<div class="empty">No included run recorded overall diagnostics.</div>';if(!D.layerCharts.length)$('layer-charts').innerHTML='<div class="empty">No included run recorded final model-scope diagnostics or retained compatible layer arrays.</div>'}
+function buildCharts(){const feature=D.featureCharts||[];charts=[];makeGroup($('time-charts'),D.timeCharts,'time');makeGroup($('diagnostic-charts'),D.diagnosticCharts,'time');makeGroup($('layer-charts'),D.layerCharts,'layer');makeGroup($('feature-charts'),feature,'layer');buildLayerSteps();buildFamilies();if(!D.diagnosticCharts.length)$('diagnostic-charts').innerHTML='<div class="empty">No included run recorded overall diagnostics.</div>';if(!D.layerCharts.length)$('layer-charts').innerHTML='<div class="empty">No included run recorded final model-scope diagnostics or retained compatible layer arrays.</div>';if(!feature.length)$('feature-charts').innerHTML='<div class="empty">No included fuzzy TopK run recorded per-feature activity vectors.</div>'}
+function fuzzySetOptions(select,values,label,preferred){
+ const wanted=preferred==null?null:String(preferred);select.innerHTML='';
+ for(const value of values){const option=document.createElement('option');option.value=String(value);option.textContent=label(value);select.appendChild(option)}
+ if(wanted!==null&&values.some(value=>String(value)===wanted))select.value=wanted}
+function fuzzyTierNumber(tier){const match=/[0-9.]+/.exec(String(tier));return match?Number(match[0]):Infinity}
+function buildFuzzyExplorer(){
+ const explorer=D.fuzzyExplorer,section=$('fuzzy-explorer');
+ if(!explorer||!Array.isArray(explorer.runs)||!explorer.runs.length){section.hidden=true;return}
+ section.hidden=false;
+ const tier=$('fuzzy-tier'),seed=$('fuzzy-seed'),layer=$('fuzzy-layer'),step=$('fuzzy-step');
+ const tiers=[...new Set(explorer.runs.map(run=>run.tier))].sort((a,b)=>fuzzyTierNumber(a)-fuzzyTierNumber(b));
+ fuzzySetOptions(tier,tiers,value=>String(value).toUpperCase(),tiers[0]);
+ const chooseRun=(resetStep=true)=>{
+  fuzzyRun=explorer.runs.find(run=>String(run.tier)===tier.value&&String(run.seed)===seed.value)||null;
+  if(!fuzzyRun)return;
+  const oldLayer=Number(layer.value)||0,layers=Array.from({length:fuzzyRun.layers},(_,index)=>index);
+  fuzzySetOptions(layer,layers,value=>`block ${value} · ${fuzzyRun.layers} layers`,Math.min(oldLayer,fuzzyRun.layers-1));
+  fuzzyStepIndex=resetStep?fuzzyRun.steps.length-1:Math.min(fuzzyStepIndex,fuzzyRun.steps.length-1);
+  step.max=String(fuzzyRun.steps.length-1);step.value=String(fuzzyStepIndex);
+  $('fuzzy-explorer-note').textContent=`${fuzzyRun.features.toLocaleString()} stored latents per layer · groups of ${fuzzyRun.groupSize} · ${fuzzyRun.tokensPerCapture.toLocaleString()} sampled tokens per capture. ${explorer.schedule.rule}. Every latent coordinate is retained at those steps; the raw ten-step log remains authoritative.`;
+  drawFuzzyExplorer()};
+ const syncSeeds=(resetStep=true)=>{
+  const previous=seed.value,seeds=explorer.runs.filter(run=>String(run.tier)===tier.value).map(run=>run.seed).sort((a,b)=>a-b);
+  fuzzySetOptions(seed,seeds,value=>`seed ${value}`,previous||seeds[0]);chooseRun(resetStep)};
+ tier.onchange=()=>syncSeeds(true);seed.onchange=()=>chooseRun(true);layer.onchange=()=>drawFuzzyExplorer();
+ step.oninput=()=>{fuzzyStepIndex=Number(step.value);drawFuzzyExplorer()};
+ $('fuzzy-dead-kind').onchange=()=>drawFuzzyDead();
+ syncSeeds(true);
+ if(fuzzyResizeObserver)fuzzyResizeObserver.disconnect();
+ fuzzyResizeObserver=new ResizeObserver(()=>drawFuzzyExplorer());fuzzyResizeObserver.observe(section)}
+function fuzzyCanvas(id){
+ const canvas=$(id),rect=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2),w=Math.max(1,rect.width),h=Math.max(1,rect.height);
+ if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr)}
+ const g=canvas.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);g.font='10px ui-monospace,monospace';return{g,w,h}}
+function fuzzyHeat(value,maximum){const t=Math.sqrt(Math.max(0,Math.min(1,value/(maximum||1))));return `rgb(${Math.round(20+220*t)},${Math.round(54+100*(1-t))},${Math.round(112+118*(1-t))})`}
+function fuzzyAxis(g,w,h,m){g.strokeStyle='#253047';g.lineWidth=1;g.beginPath();g.moveTo(m.l,m.t);g.lineTo(m.l,h-m.b);g.lineTo(w-m.r,h-m.b);g.stroke()}
+function fuzzySelectedLayer(){return Math.max(0,Math.min(fuzzyRun.layers-1,Number($('fuzzy-layer').value)||0))}
+function drawFuzzyExplorer(){
+ if(!fuzzyRun)return;fuzzyStepIndex=Math.max(0,Math.min(fuzzyRun.steps.length-1,fuzzyStepIndex));
+ $('fuzzy-step').value=String(fuzzyStepIndex);$('fuzzy-step-value').textContent='step '+fmt(fuzzyRun.steps[fuzzyStepIndex],0);
+ drawFuzzyDead();drawFuzzyRidge();drawFuzzyHistogram();drawFuzzyQuantiles()}
+function drawFuzzyDead(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-dead-canvas'),m={l:46,r:54,t:14,b:31},kind=$('fuzzy-dead-kind').value,data=kind==='sampled'?fuzzyRun.sampledDeadFraction:kind==='recent'?fuzzyRun.recentDeadFraction:fuzzyRun.batchDeadFraction,steps=fuzzyRun.steps;
+ const maximum=Math.max(1e-9,...data.flat().filter(Number.isFinite)),logs=steps.map(step=>Math.log10(Math.max(1,step))),lo=logs[0],hi=logs[logs.length-1]||lo+1,X=value=>m.l+(value-lo)/((hi-lo)||1)*(w-m.l-m.r),rowHeight=(h-m.t-m.b)/fuzzyRun.layers;
+ for(let index=0;index<steps.length;index++){const center=X(logs[index]),left=index?0.5*(center+X(logs[index-1])):m.l,right=index+1<steps.length?0.5*(center+X(logs[index+1])):w-m.r;for(let layer=0;layer<fuzzyRun.layers;layer++){g.fillStyle=fuzzyHeat(data[index][layer],maximum);g.fillRect(left,m.t+layer*rowHeight,Math.max(1,right-left+.4),Math.max(1,rowHeight+.4))}}
+ g.strokeStyle='#7dd3fc';g.lineWidth=1.5;const selected=X(logs[fuzzyStepIndex]);g.beginPath();g.moveTo(selected,m.t);g.lineTo(selected,h-m.b);g.stroke();fuzzyAxis(g,w,h,m);
+ g.fillStyle='#7e8da6';g.textAlign='right';for(let layer=0;layer<fuzzyRun.layers;layer+=Math.max(1,Math.ceil(fuzzyRun.layers/6)))g.fillText(String(layer),m.l-7,m.t+(layer+.65)*rowHeight);
+ g.textAlign='center';const stride=Math.max(1,Math.ceil(steps.length/5));for(let index=0;index<steps.length;index+=stride)g.fillText(fmt(steps[index],0),X(logs[index]),h-10);g.fillText(fmt(steps[steps.length-1],0),X(logs[logs.length-1]),h-10);
+ const legendX=w-m.r+13,gradient=g.createLinearGradient(0,m.t,0,h-m.b);gradient.addColorStop(0,fuzzyHeat(maximum,maximum));gradient.addColorStop(1,fuzzyHeat(0,maximum));g.fillStyle=gradient;g.fillRect(legendX,m.t,10,h-m.t-m.b);g.textAlign='left';g.fillStyle='#7e8da6';g.fillText((100*maximum).toFixed(maximum<.01?2:1)+'%',legendX+14,m.t+8);g.fillText('0',legendX+14,h-m.b);
+ const layer=fuzzySelectedLayer(),value=data[fuzzyStepIndex][layer],definition=kind==='sampled'?'never sampled active so far':kind==='recent'?'inactive across the trailing 10 sampled batches':'inactive in this sampled batch';$('fuzzy-dead-readout').textContent=`step ${fuzzyRun.steps[fuzzyStepIndex].toLocaleString()} · block ${layer} · ${(100*value).toFixed(4)}% ${definition} · heatmap maximum ${(100*maximum).toFixed(4)}%`}
+function drawFuzzyRidge(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-ridge-canvas'),m={l:58,r:18,t:13,b:31},layer=fuzzySelectedLayer(),frames=fuzzyRun.activationFrequencyHistograms,rows=frames.length,plotW=w-m.l-m.r,plotH=h-m.t-m.b,spacing=plotH/Math.max(1,rows),bins=frames[0][layer].length;
+ g.fillStyle='#7e8da6';g.textAlign='center';g.fillText('zero',m.l,h-10);g.fillText('positive activation frequency (log10)',m.l+plotW*.58,h-10);g.textAlign='right';
+ const labelStride=Math.max(1,Math.ceil(rows/6));for(let index=0;index<rows;index++){const counts=frames[index][layer],peak=Math.max(1,...counts),base=m.t+(index+.8)*spacing,highlight=index===fuzzyStepIndex;g.beginPath();for(let bin=0;bin<bins;bin++){const x=m.l+bin/(bins-1)*plotW,y=base-(counts[bin]/peak)*Math.min(12,spacing*.82);bin?g.lineTo(x,y):g.moveTo(x,y)}g.lineTo(w-m.r,base);g.lineTo(m.l,base);g.closePath();g.fillStyle=highlight?'rgba(125,211,252,.34)':'rgba(196,181,253,.12)';g.fill();g.strokeStyle=highlight?'#7dd3fc':'rgba(196,181,253,.55)';g.lineWidth=highlight?1.6:.8;g.stroke();if(index%labelStride===0||index===rows-1){g.fillStyle=highlight?'#edf4ff':'#7e8da6';g.fillText(fmt(fuzzyRun.steps[index],0),m.l-7,base)}}fuzzyAxis(g,w,h,m)}
+function drawFuzzyHistogram(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-hist-canvas'),m={l:48,r:14,t:14,b:36},layer=fuzzySelectedLayer(),counts=fuzzyRun.activationFrequencyHistograms[fuzzyStepIndex][layer],fractions=counts.map(value=>value/fuzzyRun.features),maximum=Math.max(1e-9,...fractions),plotW=w-m.l-m.r,plotH=h-m.t-m.b,bar=plotW/counts.length;
+ g.strokeStyle='#253047';g.fillStyle='#7e8da6';g.textAlign='right';for(let tick=0;tick<=4;tick++){const value=maximum*tick/4,y=h-m.b-value/maximum*plotH;g.beginPath();g.moveTo(m.l,y);g.lineTo(w-m.r,y);g.stroke();g.fillText((100*value).toFixed(value<.01?2:1)+'%',m.l-6,y+3)}
+ for(let index=0;index<fractions.length;index++){const height=fractions[index]/maximum*plotH;g.fillStyle=index===0?'#f9a8d4':'#7dd3fc';g.fillRect(m.l+index*bar+.5,h-m.b-height,Math.max(1,bar-1),height)}fuzzyAxis(g,w,h,m);g.fillStyle='#7e8da6';g.textAlign='center';g.fillText('zero',m.l+bar/2,h-11);g.fillText('10^'+fuzzyRun.histogramEdgesLog10[0],m.l+bar*1.5,h-11);g.fillText('positive frequency → 1',w-m.r,h-11);
+ const zeros=counts[0],positive=fuzzyRun.positiveCounts[fuzzyStepIndex][layer],median=fuzzyRun.positiveFrequencyQuantiles[fuzzyStepIndex][layer][2];$('fuzzy-hist-readout').textContent=`step ${fuzzyRun.steps[fuzzyStepIndex].toLocaleString()} · block ${layer} · ${zeros.toLocaleString()} zero (${(100*zeros/fuzzyRun.features).toFixed(4)}%) · ${positive.toLocaleString()} positive · positive median ${median==null?'—':Number(median).toPrecision(4)}`}
+function drawFuzzyQuantiles(){
+ if(!fuzzyRun)return;const {g,w,h}=fuzzyCanvas('fuzzy-quantile-canvas'),m={l:58,r:18,t:30,b:31},frame=fuzzyRun.positiveFrequencyQuantiles[fuzzyStepIndex],probabilities=D.fuzzyExplorer.quantileProbabilities,values=frame.flat().filter(value=>value!=null&&value>0),logMin=Math.floor(Math.log10(Math.min(...values))),logMax=Math.ceil(Math.log10(Math.max(...values))),lo=logMin===logMax?logMin-1:logMin,hi=logMin===logMax?logMax+1:logMax,X=layer=>m.l+(layer/Math.max(1,fuzzyRun.layers-1))*(w-m.l-m.r),Y=value=>m.t+(hi-Math.log10(value))/(hi-lo)*(h-m.t-m.b),colors=['#67e8f9','#7dd3fc','#86efac','#fde047','#fb923c','#f9a8d4'];
+ fuzzyAxis(g,w,h,m);g.strokeStyle='#253047';g.fillStyle='#7e8da6';g.textAlign='right';for(let exponent=lo;exponent<=hi;exponent++){const y=Y(10**exponent);g.beginPath();g.moveTo(m.l,y);g.lineTo(w-m.r,y);g.stroke();g.fillText('1e'+exponent,m.l-7,y+3)}g.textAlign='center';for(let layer=0;layer<fuzzyRun.layers;layer++)if(layer%Math.max(1,Math.ceil(fuzzyRun.layers/8))===0||layer===fuzzyRun.layers-1)g.fillText(String(layer),X(layer),h-10);
+ probabilities.forEach((probability,q)=>{g.strokeStyle=colors[q%colors.length];g.lineWidth=q===2?2:1.2;g.beginPath();let started=false;for(let layer=0;layer<fuzzyRun.layers;layer++){const value=frame[layer][q];if(value==null||value<=0)continue;const x=X(layer),y=Y(value);started?g.lineTo(x,y):g.moveTo(x,y);started=true}g.stroke();const legendX=m.l+q*(w-m.l-m.r)/probabilities.length;g.fillStyle=colors[q%colors.length];g.textAlign='left';g.fillText('q'+Math.round(probability*100),legendX,m.t-12)})}
 function makeGroup(root,data,type){root.innerHTML=data.map(c=>`<article class="chart" data-family="${esc(c.family||'')}"><div class="chart-head"><h2>${esc(c.title)}</h2><div class="chart-tools"><span class="chart-unit">${esc(c.yLabel)}</span><button class="icon-button reset-chart" title="Reset view" aria-label="Reset ${esc(c.title)} view">↺</button><button class="icon-button expand-chart" title="Open full panel" aria-label="Enlarge ${esc(c.title)}">⛶</button></div></div><div class="canvas-wrap"><canvas aria-label="${esc(c.title)}"></canvas></div></article>`).join('');[...root.querySelectorAll('.chart')].forEach((article,i)=>{const item={canvas:article.querySelector('canvas'),article,data:data[i],type,view:null,drag:null};article.querySelector('.reset-chart').onclick=()=>{item.view=null;redraw(item)};article.querySelector('.expand-chart').onclick=()=>openFocus(item);attachCanvas(item);charts.push(item)})}
 function buildLayerSteps(){
- const all=new Set();for(const c of D.layerCharts)for(const s of c.series)if(visible.has(s.run))for(const step of s.steps)all.add(step);
+ const all=new Set();for(const c of [...D.layerCharts,...(D.featureCharts||[])])for(const s of c.series)if(visible.has(s.run))for(const step of s.steps)all.add(step);
  layerSteps=[...all].sort((a,b)=>a-b);
  const wrap=$('layer-step-control'),slider=$('layer-step');
  wrap.hidden=layerSteps.length<2;
@@ -469,12 +570,13 @@ function selectedPayload(){
  const keep=visible,
   pick=list=>list.map(c=>({...c,series:c.series.filter(s=>keep.has(s.run))})).filter(c=>c.series.length),
   runs=D.runs.filter(r=>keep.has(r.id)).map(r=>({...r,selected:true})),
+  fuzzyExplorer=D.fuzzyExplorer?{...D.fuzzyExplorer,runs:D.fuzzyExplorer.runs.filter(r=>keep.has(r.run))}:null,
   // A partial export must say so on its own face; a full one stays a copy.
-  notices=runs.length<D.runs.length
+ notices=runs.length<D.runs.length
    ?[...D.notices,'Exported subset: '+runs.length+' of '+D.runs.length+' runs from the report generated '+D.meta.generatedAt+'.']
    :D.notices;
  return{...D,meta:{...D.meta,included:runs.length,skipped:0},runs,notices,skipped:[],
-  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts)}}
+  timeCharts:pick(D.timeCharts),diagnosticCharts:pick(D.diagnosticCharts),layerCharts:pick(D.layerCharts),featureCharts:pick(D.featureCharts||[]),fuzzyExplorer}}
 async function packPayload(payload){
  // Nothing could have loaded this page without DecompressionStream, so its
  // counterpart is present too; refusing beats emitting a differently-shaped file.
@@ -528,7 +630,7 @@ function tarArchive(entries){
  parts.push(new Uint8Array(1024));return new Blob(parts,{type:'application/x-tar'})}
 function safeArchivePart(value){const part=String(value).replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^\.+/,'');return part||'run'}
 function riglogNames(run){
- const declared=Array.isArray(run.riglogs)?run.riglogs.filter(name=>typeof name==='string'&&/^[A-Za-z0-9._-]+\.riglog$/.test(name)):[];
+ const declared=Array.isArray(run.riglogs)?run.riglogs.filter(name=>typeof name==='string'&&/^[A-Za-z0-9._-]+\.(?:riglog|rigvec)$/.test(name)):[];
  return declared.length?declared:['training.riglog','diagnostics.riglog','diagnostics-partial.riglog']}
 async function fetchRiglogs(runs){
  const source=D.rawSource;if(!source||!source.repo||!source.study)throw new Error('raw .riglogs are available from reports opened through the study browser');
@@ -539,22 +641,23 @@ async function fetchRiglogs(runs){
   const response=await fetch(base+encodeURIComponent(run.id)+'/'+encodeURIComponent(name));
   if(response.status===404&&name!=='training.riglog')continue;
   if(!response.ok)throw new Error(run.id+'/'+name+' → HTTP '+response.status);
-  const blob=await response.blob(),magic=new Uint8Array(await blob.slice(0,8).arrayBuffer()),expected=[82,73,71,76,79,71,0,1];
-  if(magic.length!==expected.length||expected.some((value,index)=>magic[index]!==value))throw new Error(run.id+'/'+name+' is not a valid .riglog');
+  const blob=await response.blob(),magic=new Uint8Array(await blob.slice(0,8).arrayBuffer());let expected=[82,73,71,76,79,71,0,1];
+  if(name.endsWith('.rigvec'))expected=[82,73,71,70,86,69,67,1];
+  if(magic.length!==expected.length||expected.some((value,index)=>magic[index]!==value))throw new Error(run.id+'/'+name+' is not a valid raw rig log');
   entries.push({path:safeArchivePart(run.id)+'/'+name,blob})}
- if(!entries.length)throw new Error('the selected runs did not publish any .riglog files');
+ if(!entries.length)throw new Error('the selected runs did not publish any raw rig log files');
  return entries}
 async function exportRiglogs(){
  const runs=D.runs.filter(run=>visible.has(run.id));
  if(!runs.length){exportStatus('Select at least one run to export.',true);return}
- const name='riglogs-'+exportSlug(runs)+'.tar.gz';setExportBusy(true);exportStatus('Choose where to save the .riglog archive…');
+ const name='riglogs-'+exportSlug(runs)+'.tar.gz';setExportBusy(true);exportStatus('Choose where to save the raw-log archive…');
  try{
   const handle=await chooseSaveFile(name,'Selected raw rig logs','application/gzip','.gz');
   if(typeof CompressionStream!=='function')throw new Error('this browser cannot compress the archive (needs CompressionStream)');
-  const entries=await fetchRiglogs(runs);exportStatus('Packing '+entries.length+' original .riglog file'+(entries.length===1?'':'s')+'…');
+  const entries=await fetchRiglogs(runs);exportStatus('Packing '+entries.length+' original raw-log file'+(entries.length===1?'':'s')+'…');
   const stream=tarArchive(entries).stream().pipeThrough(new CompressionStream('gzip')),
    blob=await new Response(stream).blob(),saved=await saveBlob(blob,name,handle);
-  exportStatus(saved+' · '+entries.length+' .riglog file'+(entries.length===1?'':'s')+' · '+mb(blob.size))}
+  exportStatus(saved+' · '+entries.length+' raw-log file'+(entries.length===1?'':'s')+' · '+mb(blob.size))}
  catch(error){exportStatus(cancelled(error)?'Export cancelled.':'Export failed: '+String(error&&error.message||error),!cancelled(error))}
  finally{setExportBusy(false)}}
 loadPayload().then(payload=>{

@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 451 runs across nineteen studies, laid out as `<study>/<run-name>/`, at full
+— 463 runs across twenty studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -54,6 +54,7 @@ by-product:
 | gumbel-local-moe | exact endpoints + mechanism reductions | — | 0.04 MB |
 | sparse-autoencoder-eqflop | exact endpoints + compute derivation | — | 0.02 MB |
 | fuzzy-topk-three-arm-ladder | exact endpoints + paired-seed/compute tables | — | 0.03 MB |
+| fuzzy-topk-sparsity-diagnostics | exact mechanism reductions + 40.19 GiB raw vectors | — | 0.02 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -116,17 +117,25 @@ The page reports every validation endpoint, sample SD, architecture, stored
 parameter count, issued FLOPs, throughput, provenance hash, and the explicit
 incomplete-250M evidence boundary. It uses inline SVG and no runtime fetch.
 
+`fuzzy-topk-sparsity-diagnostics.html` is a static mechanism report over twelve
+fuzzy-only runs from 60M through 500M. It shows when persistent feature
+inactivity emerges, its layer profile, and the associated within-group
+competition. The study browser carries the one-off interactive distributions:
+dead-layer heatmaps, activation-frequency ridgelines, a draggable-step
+histogram, and positive-frequency quantiles.
+
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
-registry cannot make. Everything so far is a line against the time axis; a
-distribution rather than a scalar — a routing histogram, say — wants bars
-against expert index and would arrive as a new chart kind rather than being
-bent into a timeline.
+registry cannot make. Ordinary report metrics remain lines against time or
+layer. The fuzzy sparsity study is the one explicit exception: it precomputes
+zero-aware log-frequency histograms and positive quantiles from full-neuron
+vectors and renders them with dedicated histogram, ridgeline, and heatmap
+views rather than bending a distribution into a scalar timeline.
 
 ## The study browser
 
 [`study-browser.html`](study-browser.html) carries no run data at all — about
-64 KB. It
+80 KB. It
 lists the studies, renders each one's card from the dataset, and fetches only
 that study's overview (0.05–1.1 MB) when you pick one. Each study always links
 to its raw files on Hugging Face. A second, separately labelled click loads the
@@ -193,6 +202,10 @@ all 24 archived runs. Its matched coordinate is total active matrix FLOPs;
 backend-issued FLOPs and throughput are reported separately. The incomplete
 double-fuzzy 250M attempt has no endpoint and is not in the archive.
 
+The fuzzy TopK sparsity-diagnostics study likewise uses TPU v4 at 4 processes
+and 16 chips for all twelve runs, spanning 60M through 500M without crossing a
+topology boundary.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -213,6 +226,7 @@ double-fuzzy 250M attempt has no endpoint and is not in the archive.
 | [gumbel-local-moe](gumbel-local-moe.html) | 8 | 125M | Gumbel-routed local MoE steps × seed | [`moe-gumbel-local-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/moe-gumbel-local-125M) |
 | [sparse-autoencoder-eqflop](sparse-autoencoder-eqflop.html) | 13 | 60M geometry | dictionary width × retained width at equal algorithmic FLOPs | [`sparse-autoencoder-eqflop-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M) |
 | [fuzzy-topk-three-arm-ladder](fuzzy-topk-three-arm-ladder.html) | 24 | 60M/125M/250M | dense vs fuzzy TopK vs double-fuzzy at matched active FLOPs | [`fuzzy-topk-three-arm-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder) |
+| [fuzzy-topk-sparsity-diagnostics](fuzzy-topk-sparsity-diagnostics.html) | 12 | 60M/125M/250M/500M | per-feature fuzzy TopK activity over training | [`fuzzy-topk-sparsity-diagnostics-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-sparsity-diagnostics-ladder) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -766,6 +780,45 @@ uv run --frozen --no-sync rig run fuzzy_topk_autoencoder \
   --name 60m-eqflop-fuzzy-h16d-k4d-l11-s1337 -- \
   --sparse-top-k 1536
 ```
+
+## fuzzy-topk-sparsity-diagnostics.html
+
+Twelve verified fuzzy-only runs add full per-feature observations to the 60M,
+125M, 250M, and 500M active-compute ladder. Every block records winner
+frequency, positive activation frequency, unconditional activation mean, and
+unconditional activation RMS for every one of its `H=16D` stored features on
+one 131,072-token global batch at step 1, every ten steps, and final.
+
+The observer is trajectory-neutral. All nine 60M–250M `training.riglog` files
+are byte-identical to the same-tier, same-seed uninstrumented fuzzy runs in the
+three-arm study. The twelve raw vector logs total 40.19 GiB. An additional
+0.891 GiB companion retains every feature value on a widening time schedule:
+all captures through step 200, then 300, 500, 900, 1700, and doubled gaps plus
+the exact final capture.
+
+Almost every feature is observed positive by step 1 and all are observed by
+step 10, but features become persistently inactive later. The final fraction
+with zero positive activation in ten consecutive sampled batches averages
+34.33%, 35.76%, 33.87%, and 36.34% over layers and seeds at 60M, 125M, 250M,
+and 500M. Block 1 is the bottleneck: its three-seed dead fraction rises from
+69.69% to 85.62% across the ladder while normalized within-group winner entropy
+falls from 0.424 to 0.103. Later blocks progressively recover activity.
+
+The [static findings report](fuzzy-topk-sparsity-diagnostics.html) summarizes
+those reductions. The study browser provides the requested one-off explorer
+with tier/seed/layer selectors, a training-step dragger, dead-latent heatmaps,
+activation-frequency ridgelines and histograms, and positive-frequency
+quantiles. “Dead” remains a sampled-batch definition, not proof that a feature
+never activates elsewhere in the corpus; the study observes under-use and does
+not test a corrective intervention.
+
+The canonical manifests are
+[`ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json`](../../recipes/fuzzy_topk_autoencoder/ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json)
+and
+[`ablation-sparsity-diagnostics-ladder-500m-3seed.json`](../../recipes/fuzzy_topk_autoencoder/ablation-sparsity-diagnostics-ladder-500m-3seed.json).
+The archived records retain the final 500M seed's notebook-dependency-only
+`pyproject.toml`/`uv.lock` dirt; trainer, shared tree, config, data, runtime, and
+topology identities are unchanged.
 
 ## transfer-charts.html
 

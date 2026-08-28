@@ -2,7 +2,7 @@
   "schema_version": 1,
   "study_id": "fuzzy-topk-sparsity-diagnostics-ladder-500m-3seed",
   "extends_study": "fuzzy-topk-sparsity-diagnostics-ladder-60m-125m-250m-3seed",
-  "status": "queued_after_parent_ladder",
+  "status": "sealed_3_runs_complete_verified",
   "objective": "Extend the full per-feature fuzzy TopK mechanism dataset to the 500M dense-equivalent active-compute tier with the same three paired seeds and cadence-10 observer.",
   "common": {
     "accelerator": "TPU v4",
@@ -98,9 +98,28 @@
   "launch_policy": "Wait for all nine parent-ladder cells to complete and verify. Run one 120-step feasibility gate, then launch seeds 1337, 1338, and 1339 sequentially. Do not retry, select, or stop based on intermediate loss or sparsity observations.",
   "stopping_rule": "Every admitted seed runs through the complete explicit cosine schedule. Any parent verification or systems failure stops the dependent queue for inspection.",
   "run_ids": {
-    "feasibility_gate": null,
-    "1337": null,
-    "1338": null,
-    "1339": null
+    "feasibility_gate": "20260828T061700.427367Z-fuzzy_topk_autoencoder-500m-fuzzy-sparsity-c10-preflight-s1350-e05973e6",
+    "1337": "20260828T062303.200275Z-fuzzy_topk_autoencoder-500m-fuzzy-sparsity-c10-s1337-eed705b2",
+    "1338": "20260828T112822.095886Z-fuzzy_topk_autoencoder-500m-fuzzy-sparsity-c10-s1338-f4b3e841",
+    "1339": "20260828T163341.487835Z-fuzzy_topk_autoencoder-500m-fuzzy-sparsity-c10-s1339-09d410d5"
+  },
+  "results": {
+    "validation_loss_by_seed": {
+      "1337": 3.093101680278778,
+      "1338": 3.080546021461487,
+      "1339": 3.1003285944461823
+    },
+    "mean": 3.091325432062149,
+    "sample_sd": 0.010010186899804057,
+    "mean_final_trailing_10_capture_dead_fraction": 0.36337381979166666,
+    "max_seed_mean_final_layer_dead_fraction": 0.4012909075,
+    "mean_final_block_1_dead_fraction": 0.8561849
+  },
+  "provenance_note": "Seeds 1337 and 1338 are clean at 170d1f93d7b33a410ed1dc930d62c1bc8dce2d0d. Seed 1339 records only pyproject.toml and uv.lock notebook-dependency dirt at 6d3ad351837e5b0d2e5320105b4ee4d5a250e1cb; trainer, shared Python tree, recipe config, JAX/JAXlib/libtpu versions, data manifest, and invoked .venv Python are unchanged.",
+  "archive": {
+    "study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "raw_rigvec_bytes": 30796700784,
+    "lossy_rigvec_bytes": 456131076,
+    "status": "combined with the 60M/125M/250M parent in one 12-run Hugging Face study; the feasibility gate is excluded"
   }
 }
