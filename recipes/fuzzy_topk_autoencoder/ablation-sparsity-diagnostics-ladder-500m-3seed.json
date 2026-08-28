@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-sparsity-diagnostics-ladder-500m-3seed",
+  "extends_study": "fuzzy-topk-sparsity-diagnostics-ladder-60m-125m-250m-3seed",
+  "status": "queued_after_parent_ladder",
+  "objective": "Extend the full per-feature fuzzy TopK mechanism dataset to the 500M dense-equivalent active-compute tier with the same three paired seeds and cadence-10 observer.",
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "recipe": "fuzzy_topk_autoencoder",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "checkpoint_policy": "none",
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "sparsity_diagnostics_every": 10
+  },
+  "source_contract": {
+    "fuzzy_train_py_sha256": "8b13c59e90ba1c203aa3259b4c4b3f968755882ed4d045e8948fd79eeccc84e1",
+    "fuzzy_dev_config_sha256": "35ebd3ca279a100bf7c76299955bbcb664c4f1cc959e21f5c332270d82aad7a4",
+    "fuzzy_kernel_sha256": "e7e7b705b1ebd932d34dc18af9e84349db597ebb45ffca49b6146806d15932d3",
+    "vector_log_format_sha256": "f38bda9e9589f3d35d0d203265601dfb6e774eb1ad2bb9430490527d2adde195",
+    "study_report_builder_sha256": "3013dbfbef16137b124ab595f063f5c179906bcd863bc8c66a3a61d70996a11e"
+  },
+  "active_compute_match": {
+    "basis": "Choose the whole fuzzy depth nearest the dense 500M FLOPs-per-token anchor, then round the fuzzy schedule to the nearest whole optimizer step at the dense total active matrix-FLOP budget.",
+    "semantic_fuzzy_mlp_rule": "2*D*H + 10*K*D training matrix FLOPs per token and layer",
+    "dense_anchor": {
+      "layers": 19,
+      "d_model": 1280,
+      "parameters": 502602240,
+      "active_flops_per_token": 5156375040,
+      "schedule_steps": 19173,
+      "planned_tokens": 2513043456,
+      "total_active_flops": 12958194550953738240
+    },
+    "fuzzy_candidate": {
+      "layers": 16,
+      "d_model": 1280,
+      "dictionary_width": 20480,
+      "retained_width": 5120,
+      "group_size": 4,
+      "stored_parameters": 1072968960,
+      "active_flops_per_token": 5054138880,
+      "issued_flops_per_token": 8199866880,
+      "schedule_steps": 19561,
+      "planned_tokens": 2563899392,
+      "tokens_per_stored_parameter": 2.389537337594556,
+      "total_active_flops": 12958303601515560960,
+      "relative_active_mismatch": 0.000008415567569475257,
+      "total_issued_flops": 21023633708112936960,
+      "issued_flops_relative_to_dense": 1.622419977215543
+    }
+  },
+  "instrumentation": {
+    "capture_schedule": "optimizer step 1, every 10 steps, and the exact final optimizer step",
+    "artifact": "fuzzy_sparsity.rigvec",
+    "tensor_layout": "float32[capture, metric, layer, stored_feature]",
+    "metric_order": [
+      "fuzzy.winner_frequency",
+      "fuzzy.activation_frequency",
+      "fuzzy.activation_mean",
+      "fuzzy.activation_rms"
+    ],
+    "expected_captures_per_run": 1958,
+    "expected_rigvec_bytes_per_run": 10265566928,
+    "expected_rigvec_bytes_three_seeds": 30796700784,
+    "runtime_isolation": "The stateless forward-only observer runs before the unchanged ordinary optimizer executable on capture steps. Only the controller transfers and appends the replicated vector tensor."
+  },
+  "feasibility_gate": {
+    "reason": "This is the first 1.073B-stored-parameter fuzzy run at 8k context on v4-32.",
+    "seed": 1350,
+    "stop_after_step": 120,
+    "sparsity_diagnostics_every": 10,
+    "acceptance": "Compilation, memory use, collectives, optimizer steps, feature captures, and validation must complete without a systems error. The development gate is excluded from the mechanism dataset archive."
+  },
+  "recipe_overrides": [
+    "--sparse-layers",
+    "16",
+    "--sparse-top-k",
+    "5120",
+    "--sparse-training-steps",
+    "19561",
+    "--sparsity-diagnostics-every",
+    "10"
+  ],
+  "launch_policy": "Wait for all nine parent-ladder cells to complete and verify. Run one 120-step feasibility gate, then launch seeds 1337, 1338, and 1339 sequentially. Do not retry, select, or stop based on intermediate loss or sparsity observations.",
+  "stopping_rule": "Every admitted seed runs through the complete explicit cosine schedule. Any parent verification or systems failure stops the dependent queue for inspection.",
+  "run_ids": {
+    "feasibility_gate": null,
+    "1337": null,
+    "1338": null,
+    "1339": null
+  }
+}
