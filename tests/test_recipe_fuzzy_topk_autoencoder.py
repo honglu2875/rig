@@ -97,7 +97,7 @@ class FuzzyTopKRecipeTests(unittest.TestCase):
             [1, 100, 200, 205],
         )
 
-    def test_feature_diagnostic_step_is_the_same_optimizer_update(self) -> None:
+    def test_feature_observer_leaves_the_optimizer_update_exactly_unchanged(self) -> None:
         config = resolved("smoke")
         params = trainer.init_params(config, 3)
         optimizer = jax.tree_util.tree_map(
@@ -109,10 +109,6 @@ class FuzzyTopKRecipeTests(unittest.TestCase):
         x = tokens % config.semantic_vocab_size
         y = (tokens + 1) % config.semantic_vocab_size
 
-        ordinary = trainer.diagnostic_train_step(
-            params, optimizer, x, y, config, decay_mask
-        )
-
         kernel_config = FuzzyTopKConfig(
             top_k=config.mlp_top_k,
             backend=config.sparse_mlp_backend,
@@ -123,27 +119,29 @@ class FuzzyTopKRecipeTests(unittest.TestCase):
                 *operands, config=kernel_config
             )
 
-        instrumented = trainer.sparsity_diagnostic_train_step(
+        feature_statistics = trainer.fuzzy_sparsity_diagnostics(
             params,
-            optimizer,
             x,
-            y,
             config,
-            decay_mask,
             None,
             diagnostic_mlp,
         )
+        observed_then_updated = trainer.diagnostic_train_step(
+            params, optimizer, x, y, config, decay_mask
+        )
+        ordinary = trainer.diagnostic_train_step(
+            params, optimizer, x, y, config, decay_mask
+        )
 
         for actual_tree, expected_tree in zip(
-            instrumented[:4], ordinary, strict=True
+            observed_then_updated, ordinary, strict=True
         ):
             for actual, expected in zip(
                 jax.tree_util.tree_leaves(actual_tree),
                 jax.tree_util.tree_leaves(expected_tree),
                 strict=True,
             ):
-                np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
-        feature_statistics = instrumented[4]
+                np.testing.assert_array_equal(actual, expected)
         self.assertEqual(
             feature_statistics.shape,
             (

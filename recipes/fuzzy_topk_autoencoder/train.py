@@ -1389,43 +1389,23 @@ def cross_entropy(
     return -jnp.mean(selected, dtype=jnp.float32)
 
 
-def cross_entropy_with_sparsity_diagnostics(
+def fuzzy_sparsity_diagnostics(
     params: Mapping[str, Any],
     x: jax.Array,
-    y: jax.Array,
     config: Config,
     attention_fn: AttentionCallable | None,
     sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable,
-) -> tuple[jax.Array, jax.Array]:
-    """Return the ordinary objective plus stop-gradient fuzzy feature vectors."""
+) -> jax.Array:
+    """Observe fuzzy feature vectors without participating in the update graph."""
 
-    hidden, statistics = gpt_hidden(
+    _hidden, statistics = gpt_hidden(
         params,
         x,
         config,
         attention_fn,
         sparse_mlp_diagnostic_fn=sparse_mlp_diagnostic_fn,
     )
-    output_embedding = params.get("output_embedding", params["token_embedding"])
-    if config.loss_backend == "tiled":
-        loss = tiled_tied_cross_entropy(
-            hidden,
-            output_embedding,
-            y,
-            semantic_vocab_size=config.semantic_vocab_size,
-            vocab_tile_size=config.vocab_tile_size,
-            compute_dtype=config.compute_dtype,
-        )
-    else:
-        logits = jnp.einsum(
-            "btd,vd->btv",
-            hidden,
-            output_embedding.astype(config.compute_dtype),
-        ).astype(jnp.float32)[..., : config.semantic_vocab_size]
-        log_probabilities = jax.nn.log_softmax(logits, axis=-1)
-        selected = jnp.take_along_axis(log_probabilities, y[..., None], axis=-1)
-        loss = -jnp.mean(selected, dtype=jnp.float32)
-    return loss, statistics
+    return statistics
 
 
 def learning_rate(step: jax.Array, config: Config) -> jax.Array:
@@ -1580,12 +1560,12 @@ def _apply_training_update(
     decay_mask: Any | None = None,
     attention_fn: AttentionCallable | None = None,
     sparse_mlp_fn: FuzzyTopKCallable | None = None,
-    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable | None = None,
-) -> tuple[Any, dict[str, Any], dict[str, jax.Array], Any, jax.Array | None]:
+) -> tuple[Any, dict[str, Any], dict[str, jax.Array], Any]:
     """Apply one ordinary update and also return the raw, pre-clip gradient.
 
-    Both the ordinary and sparse-diagnostic executables use this exact function.
-    Diagnostics therefore do not substitute a different optimizer formula.
+    Both the ordinary and model-diagnostic executables use this exact function.
+    Feature observation happens in a separate forward-only executable, so it
+    cannot substitute a different optimizer graph or formula.
     """
 
     if decay_mask is None:
@@ -1594,27 +1574,11 @@ def _apply_training_update(
         optimizer_hyperparameter_trees(params, config)
     )
     beta1, beta2 = effective_adam_betas(config)
-    if sparse_mlp_diagnostic_fn is None:
-        loss, gradients = jax.value_and_grad(
-            lambda candidate: cross_entropy(
-                candidate, x, y, config, attention_fn, sparse_mlp_fn
-            )
-        )(params)
-        sparsity_statistics = None
-    else:
-        if sparse_mlp_fn is not None:
-            raise ValueError("ordinary and diagnostic sparse MLP callables are exclusive")
-        (loss, sparsity_statistics), gradients = jax.value_and_grad(
-            lambda candidate: cross_entropy_with_sparsity_diagnostics(
-                candidate,
-                x,
-                y,
-                config,
-                attention_fn,
-                sparse_mlp_diagnostic_fn,
-            ),
-            has_aux=True,
-        )(params)
+    loss, gradients = jax.value_and_grad(
+        lambda candidate: cross_entropy(
+            candidate, x, y, config, attention_fn, sparse_mlp_fn
+        )
+    )(params)
     gradients = jax.tree_util.tree_map(lambda grad: grad.astype(jnp.float32), gradients)
     raw_gradients = gradients
     squared_norms = [
@@ -1686,7 +1650,6 @@ def _apply_training_update(
             "learning_rate": lr,
         },
         raw_gradients,
-        sparsity_statistics,
     )
 
 
@@ -1700,7 +1663,7 @@ def train_step(
     attention_fn: AttentionCallable | None = None,
     sparse_mlp_fn: FuzzyTopKCallable | None = None,
 ) -> tuple[Any, dict[str, Any], dict[str, jax.Array]]:
-    params, optimizer, metrics, _, _ = _apply_training_update(
+    params, optimizer, metrics, _ = _apply_training_update(
         params,
         optimizer,
         x,
@@ -1726,7 +1689,7 @@ def diagnostic_train_step(
     """Run the same update as :func:`train_step` and emit sparse statistics."""
 
     params_before = params
-    params, optimizer, metrics, raw_gradients, _ = _apply_training_update(
+    params, optimizer, metrics, raw_gradients = _apply_training_update(
         params,
         optimizer,
         x,
@@ -1738,37 +1701,6 @@ def diagnostic_train_step(
     )
     values = diagnostic_values(params_before, raw_gradients, params)
     return params, optimizer, metrics, values
-
-
-def sparsity_diagnostic_train_step(
-    params: Any,
-    optimizer: Mapping[str, Any],
-    x: jax.Array,
-    y: jax.Array,
-    config: Config,
-    decay_mask: Any | None,
-    attention_fn: AttentionCallable | None,
-    sparse_mlp_diagnostic_fn: FuzzyTopKDiagnosticCallable,
-) -> tuple[Any, dict[str, Any], dict[str, jax.Array], jax.Array, jax.Array]:
-    """Apply the ordinary update and emit model plus fuzzy feature diagnostics."""
-
-    params_before = params
-    params, optimizer, metrics, raw_gradients, feature_statistics = (
-        _apply_training_update(
-            params,
-            optimizer,
-            x,
-            y,
-            config,
-            decay_mask,
-            attention_fn,
-            sparse_mlp_diagnostic_fn=sparse_mlp_diagnostic_fn,
-        )
-    )
-    if feature_statistics is None:  # pragma: no cover - callable guarantees aux
-        raise AssertionError("sparsity diagnostic update returned no feature statistics")
-    model_statistics = diagnostic_values(params_before, raw_gradients, params)
-    return params, optimizer, metrics, model_statistics, feature_statistics
 
 
 def eval_step(
@@ -2159,25 +2091,21 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             raise AssertionError("sparsity diagnostics have no sparse MLP callable")
         console.phase(
             "Compiling fuzzy sparsity diagnostics",
-            "feature reductions are fused into the four-choice MLP passes",
+            "a separate observer keeps the optimizer executable byte-for-byte fixed",
         )
         sparsity_compile_started = time.perf_counter()
         sparsity_diagnostic_executable = (
             jax.jit(
-                lambda p, o, x, y: sparsity_diagnostic_train_step(
+                lambda p, x: fuzzy_sparsity_diagnostics(
                     p,
-                    o,
                     x,
-                    y,
                     config,
-                    decay_mask,
                     attention_fn,
                     sparse_mlp_diagnostic_fn,
                 ),
-                in_shardings=(replicated, replicated, data_sharding, data_sharding),
-                donate_argnums=(0, 1),
+                in_shardings=(replicated, data_sharding),
             )
-            .lower(params, optimizer, sample_x, sample_y)
+            .lower(params, sample_x)
             .compile()
         )
         sparsity_diagnostic_compile_seconds = (
@@ -2349,6 +2277,7 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     batch_y, mesh, P("data", None), data_sharding, process_count
                 )
                 diagnostic_values_at_step: jax.Array | None = None
+                feature_statistics_at_step: jax.Array | None = None
                 if should_run_sparsity_diagnostics(
                     step_index,
                     every=config.sparsity_diagnostics_every,
@@ -2358,27 +2287,15 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                         raise AssertionError(
                             "sparsity diagnostic executable was not compiled"
                         )
-                    (
-                        params,
-                        optimizer,
-                        last_metrics,
-                        diagnostic_values_at_step,
-                        feature_statistics_at_step,
-                    ) = sparsity_diagnostic_executable(
-                        params, optimizer, batch_x, batch_y
+                    feature_statistics_at_step = sparsity_diagnostic_executable(
+                        params, batch_x
                     )
-                    if is_controller:
-                        if sparsity_log is None:
-                            raise AssertionError("sparsity vector log was not opened")
-                        sparsity_log.append(
-                            step_index,
-                            np.asarray(
-                                local_device_get(feature_statistics_at_step),
-                                dtype=np.float32,
-                            ),
-                        )
-                        sparsity_point_count += 1
-                elif should_run_diagnostics(
+                    # Finish every observer read before the ordinary update
+                    # donates the same parameter buffers. This observer has no
+                    # state and cannot influence the update executable.
+                    sync_tree(feature_statistics_at_step)
+
+                if should_run_diagnostics(
                     step_index,
                     every=config.diagnostics_every,
                     final_step=config.final_step,
@@ -2415,6 +2332,17 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                                 point.step,
                                 np.asarray(point.values, dtype=np.float32).reshape(-1),
                             )
+                if feature_statistics_at_step is not None and is_controller:
+                    if sparsity_log is None:
+                        raise AssertionError("sparsity vector log was not opened")
+                    sparsity_log.append(
+                        step_index,
+                        np.asarray(
+                            local_device_get(feature_statistics_at_step),
+                            dtype=np.float32,
+                        ),
+                    )
+                    sparsity_point_count += 1
                 if should_run_validation_probe(
                     step_index,
                     every=config.val_every,
