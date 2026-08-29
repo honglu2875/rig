@@ -156,6 +156,21 @@ positive group activity, winner entropy, validation loss, and gradient
 stability. Tied-only is retained as a mechanism ablation even if the combined
 cell wins.
 
+The completed systems gate measured:
+
+| cell | train seconds | throughput | overhead vs. parent | validation loss | screen status |
+|---|---:|---:|---:|---:|---|
+| independent, no ghost | 14.631 | 1.075M tok/s | baseline | 6.2898 | admitted |
+| tied, no ghost | 14.537 | 1.082M tok/s | -0.6% | 6.2541 | admitted |
+| tied, ghost `1/128` | 16.264 | 0.967M tok/s | +11.2% | 6.2681 | admitted |
+| tied, ghost `1/32` | 16.907 | 0.930M tok/s | +15.6% | 6.2675 | admitted |
+| tied, ghost `1/8` | 18.364 | 0.856M tok/s | +25.5% | 6.2683 | excluded |
+
+All five bundles pass artifact verification. The `1/8` cell is excluded only
+because it narrowly exceeds the predeclared 25% wall-time ceiling; no
+scientific metric was used to stop or retry it. The other four cells proceed
+to the fixed 900-step mechanism screen.
+
 The selected paper arm then receives one 250M 120-step feasibility run. Only
 after that succeeds are seeds 1337--1339 queued sequentially at 60M, 125M, and
 250M. Scientific intermediate metrics never trigger retries or early stopping;

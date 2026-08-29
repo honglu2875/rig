@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-paper-inspired-dead-feature-recovery",
-  "status": "cpu_validated_pre_tpu",
+  "status": "systems_gate_complete_mechanism_screen_pending",
   "objective": "Compare parent fuzzy Top-K, the selected activation-frequency floor, and a paper-inspired tied-initialization plus dead-feature ghost-gradient treatment on identical 60M/125M/250M ladder coordinates.",
   "paper": {
     "title": "Scaling and evaluating sparse autoencoders",
@@ -32,7 +32,8 @@
     "sparse_mlp_backend": "choicewise",
     "evaluation_forward": "ordinary parent fuzzy Top-K with no auxiliary state or computation",
     "branch": "research/fuzzy-topk-auxk",
-    "base_commit": "6243cbb"
+    "base_commit": "6243cbb",
+    "implementation_commit": "f2d83daa2275ee54608b124fb7890c8f5b2c1053"
   },
   "paper_arm": {
     "recipe": "fuzzy_topk_auxk",
@@ -109,8 +110,71 @@
       "desired_overhead": "approximately 20% or lower",
       "state": "dead ages begin changing immediately, ghost eligibility begins exactly after 77 steps, and auxiliary activity never resets age"
     },
-    "results": {},
-    "status": "not_started"
+    "results": {
+      "parent-init-no-ghost": {
+        "run_id": "20260829T100843.114706Z-fuzzy_topk_auxk-60m-auxk-gate-parent-init-no-ghost-s1350-8d33dfad",
+        "verified": true,
+        "train_seconds": 14.631288120057434,
+        "tokens_per_second": 1075000.3602511424,
+        "overhead_fraction": 0.0,
+        "train_loss": 6.300580024719238,
+        "validation_loss": 6.289775788784027,
+        "train_compile_seconds": 37.35294266813435,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-init-no-ghost": {
+        "run_id": "20260829T101122.130756Z-fuzzy_topk_auxk-60m-auxk-gate-tied-init-no-ghost-s1350-bb3a800c",
+        "verified": true,
+        "train_seconds": 14.537473906064406,
+        "tokens_per_second": 1081937.6255897314,
+        "overhead_fraction": -0.006411890273995913,
+        "train_loss": 6.27720832824707,
+        "validation_loss": 6.254095017910004,
+        "train_compile_seconds": 35.43384515377693,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c00078125": {
+        "run_id": "20260829T101355.683878Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c00078125-s1350-22cf3a2c",
+        "verified": true,
+        "train_seconds": 16.26361490203999,
+        "tokens_per_second": 967106.0274568548,
+        "overhead_fraction": 0.11156411989077486,
+        "train_loss": 6.283992767333984,
+        "validation_loss": 6.26811158657074,
+        "train_compile_seconds": 41.35074754199013,
+        "final_batch_active_fraction": 0.9773319363594055,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c003125": {
+        "run_id": "20260829T101644.157975Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c003125-s1350-c3ac54ac",
+        "verified": true,
+        "train_seconds": 16.907050242181867,
+        "tokens_per_second": 930300.6600618114,
+        "overhead_fraction": 0.15554079062968373,
+        "train_loss": 6.283625602722168,
+        "validation_loss": 6.267491459846497,
+        "train_compile_seconds": 43.10617860988714,
+        "final_batch_active_fraction": 0.9773911237716675,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c0125": {
+        "run_id": "20260829T101940.802907Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c0125-s1350-8ce2cce6",
+        "verified": true,
+        "train_seconds": 18.36438222695142,
+        "tokens_per_second": 856475.3121352906,
+        "overhead_fraction": 0.25514459672053347,
+        "train_loss": 6.283602714538574,
+        "validation_loss": 6.268253147602081,
+        "train_compile_seconds": 40.282109554857016,
+        "final_batch_active_fraction": 0.9770804047584534,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": false,
+        "exclusion_reason": "25.514% wall-time overhead exceeds the predeclared 25% ceiling"
+      }
+    },
+    "status": "complete_4_of_5_admitted"
   },
   "mechanism_screen": {
     "tier": "60m",
@@ -119,6 +183,12 @@
     "stop_after_step": 900,
     "sparsity_diagnostics_every": 50,
     "cells": "Every systems-admitted declared cell; no unrecorded coefficient retries.",
+    "admitted_cells": [
+      "parent-init-no-ghost",
+      "tied-init-no-ghost",
+      "tied-ghost-c00078125",
+      "tied-ghost-c003125"
+    ],
     "selection_window": "last three full-neuron captures through step 900",
     "selection_metrics": [
       "persistent dead-feature fraction",
