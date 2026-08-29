@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-homeostasis",
-  "status": "implementation_validated_cpu_tpu_gates_pending",
+  "status": "soft_gate_rejected_low_overhead_implementation_validated_cpu",
   "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
   "prior_evidence": {
     "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
@@ -49,10 +49,28 @@
     "stop_after_step": 120,
     "controls": [
       "neutral parent path",
-      "switch coefficient 0.01 plus alive coefficient 1.0 at margin 0"
+      "exact Switch coefficient 0.01 plus alive coefficient 1.0 at margin 0",
+      "retained-deficit alive coefficient 1.0 at margin 0",
+      "hard-load bias coefficient 0.01 plus retained-deficit alive coefficient 1.0 at margin 0"
     ],
     "acceptance": "Both runs complete standard validation and feature captures; balanced training time is no more than 25% slower than neutral, with approximately 20% the desired systems target.",
-    "status": "pending"
+    "results": {
+      "neutral": {
+        "run_id": "20260829T004116.855967Z-fuzzy_topk_balanced-60m-homeostasis-neutral-gate-s1350-fa3ae20f",
+        "train_seconds": 15.034,
+        "tokens_per_second": 1046229.786,
+        "validation_loss": 6.2898
+      },
+      "exact_switch_plus_alive": {
+        "run_id": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb",
+        "train_seconds": 22.715,
+        "tokens_per_second": 692648.129,
+        "validation_loss": 6.2834,
+        "slowdown_percent": 51.09,
+        "decision": "rejected for the long prototype screen"
+      }
+    },
+    "status": "soft_gate_rejected_low_overhead_gates_pending"
   },
   "prototype_screen": {
     "tier": "60m",
@@ -76,12 +94,38 @@
         "balance_coefficient": 0.01,
         "temperature": 1.0,
         "alive_coefficient": 0.0,
-        "alive_margin": 0.0
+        "alive_margin": 0.0,
+        "admission": "rejected by the first soft-objective systems gate"
       },
       {
         "id": "importance-c001",
         "mode": "importance",
         "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0,
+        "admission": "held out unless a later optimized soft-objective gate passes"
+      },
+      {
+        "id": "bias-c0001",
+        "mode": "bias",
+        "balance_coefficient": 0.001,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "bias-c001",
+        "mode": "bias",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "bias-c01",
+        "mode": "bias",
+        "balance_coefficient": 0.1,
         "temperature": 1.0,
         "alive_coefficient": 0.0,
         "alive_margin": 0.0
@@ -124,11 +168,21 @@
         "balance_coefficient": 0.01,
         "temperature": 1.0,
         "alive_coefficient": 1.0,
-        "alive_margin": 0.0
+        "alive_margin": 0.0,
+        "admission": "rejected by the first soft-objective systems gate"
       },
       {
         "id": "importance-c001-alive-c1-m0",
         "mode": "importance",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0,
+        "admission": "held out unless a later optimized soft-objective gate passes"
+      },
+      {
+        "id": "bias-c001-alive-c1-m0",
+        "mode": "bias",
         "balance_coefficient": 0.01,
         "temperature": 1.0,
         "alive_coefficient": 1.0,
@@ -212,7 +266,10 @@
     }
   ],
   "run_ids": {
-    "throughput_gate": {},
+    "throughput_gate": {
+      "neutral": "20260829T004116.855967Z-fuzzy_topk_balanced-60m-homeostasis-neutral-gate-s1350-fa3ae20f",
+      "exact_switch_plus_alive": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb"
+    },
     "prototype_screen": {},
     "mature_ladder": {}
   }

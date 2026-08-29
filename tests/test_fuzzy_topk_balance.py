@@ -38,9 +38,9 @@ class FuzzyTopKBalanceKernelTests(unittest.TestCase):
         inputs = self.inputs()
         config = FuzzyTopKBalanceConfig(
             top_k=16,
+            mode="switch",
             temperature=0.7,
             alive_margin=0.05,
-            compute_soft_statistics=True,
         )
         output_cotangent = jax.random.normal(jax.random.key(26), inputs[0].shape)
         statistic_cotangent = jnp.asarray((0.04, 0.07, 0.11), jnp.float32)
@@ -96,8 +96,8 @@ class FuzzyTopKBalanceKernelTests(unittest.TestCase):
         inputs = self.inputs()
         config = FuzzyTopKBalanceConfig(
             top_k=16,
+            mode="none",
             alive_margin=0.1,
-            compute_soft_statistics=False,
         )
         _, statistics = fuzzy_topk_mlp_with_balance(*inputs, config=config)
         np.testing.assert_array_equal(np.asarray(statistics[:2]), np.zeros(2))
@@ -113,6 +113,34 @@ class FuzzyTopKBalanceKernelTests(unittest.TestCase):
             )[1][2]
         )(inputs[2])
         self.assertGreater(float(jnp.linalg.norm(gradient)), 0.0)
+
+    def test_hard_load_bias_mode_has_only_the_declared_direct_aux_gradient(
+        self,
+    ) -> None:
+        inputs = self.inputs()
+        config = FuzzyTopKBalanceConfig(top_k=16, mode="bias")
+
+        def actual_loss(*operands):
+            output, statistics = fuzzy_topk_mlp_with_balance(*operands, config=config)
+            return jnp.square(output).mean() + 0.3 * statistics[0]
+
+        def expected_loss(*operands):
+            output, statistics = naive_fuzzy_topk_mlp_with_balance(
+                *operands, config=config
+            )
+            return jnp.square(output).mean() + 0.3 * statistics[0]
+
+        actual_statistics = fuzzy_topk_mlp_with_balance(*inputs, config=config)[1]
+        expected_statistics = naive_fuzzy_topk_mlp_with_balance(*inputs, config=config)[
+            1
+        ]
+        np.testing.assert_allclose(
+            actual_statistics, expected_statistics, rtol=2e-5, atol=2e-6
+        )
+        actual_gradients = jax.grad(actual_loss, argnums=(0, 1, 2, 3, 4))(*inputs)
+        expected_gradients = jax.grad(expected_loss, argnums=(0, 1, 2, 3, 4))(*inputs)
+        for actual, expected in zip(actual_gradients, expected_gradients, strict=True):
+            np.testing.assert_allclose(actual, expected, rtol=3e-5, atol=2e-6)
 
     def test_explicit_mesh_boundary_is_trainable(self) -> None:
         inputs = self.inputs()

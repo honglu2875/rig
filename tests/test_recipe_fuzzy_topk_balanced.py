@@ -218,6 +218,23 @@ class FuzzyTopKBalancedRecipeTests(unittest.TestCase):
             balanced.layers * 14 * tokens * d_model * hidden,
         )
 
+        low_overhead = resolved(
+            "smoke",
+            "--fuzzy-balance-mode",
+            "bias",
+            "--fuzzy-balance-coefficient",
+            "0.1",
+            "--fuzzy-alive-coefficient",
+            "1.0",
+        )
+        low_overhead_breakdown = trainer.traced_flops(
+            low_overhead, trainer.init_params(low_overhead, 3)
+        )
+        self.assertEqual(
+            low_overhead_breakdown.by_site["_low_overhead_choicewise_fuzzy_topk_mlp"],
+            low_overhead.layers * 12 * tokens * d_model * hidden,
+        )
+
     def test_balance_log_width_tracks_model_and_layer_statistics(self) -> None:
         neutral = resolved("smoke")
         balanced = resolved(

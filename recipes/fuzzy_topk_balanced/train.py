@@ -189,7 +189,7 @@ _TIER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _CONTEXT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 FUZZY_SPARSITY_LOG_NAME = f"fuzzy_sparsity{vectorlog.SUFFIX}"
 _FUZZY_SPARSITY_TEMP_NAME = f".{FUZZY_SPARSITY_LOG_NAME}.tmp"
-BALANCE_MODES = ("none", "switch", "importance")
+BALANCE_MODES = ("none", "switch", "importance", "bias")
 
 
 # A deliberately small, original corpus for offline and smoke-test use.  The
@@ -507,7 +507,7 @@ class OptimizerSettings:
 class BalanceSettings:
     """Training-only pressure on grouped winners and the ReLU boundary."""
 
-    mode: Literal["none", "switch", "importance"]
+    mode: Literal["none", "switch", "importance", "bias"]
     coefficient: NonnegativeFloat
     temperature: PositiveFloat
     alive_coefficient: NonnegativeFloat
@@ -756,7 +756,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--fuzzy-balance-mode",
         choices=BALANCE_MODES,
         default=None,
-        help="none, Switch-style hard/soft load balance, or soft importance CV",
+        help=(
+            "none, Switch-style hard/soft balance, soft importance CV, or "
+            "a hard-load bias surrogate"
+        ),
     )
     sparse.add_argument(
         "--fuzzy-balance-coefficient",
@@ -1606,7 +1609,7 @@ def cross_entropy_and_balance(
 
     objective = cross_entropy_loss
     if config.balance_coefficient:
-        balance_index = {"switch": 0, "importance": 1}[config.balance_mode]
+        balance_index = {"switch": 0, "importance": 1, "bias": 0}[config.balance_mode]
         objective = objective + config.balance_coefficient * jnp.mean(
             balance.layers[:, balance_index]
         )
@@ -2053,6 +2056,23 @@ def balanced_fuzzy_topk_mlp_flop_rule(site: Site) -> int:
     return multiplier * tokens * model_width * hidden_width
 
 
+def low_overhead_fuzzy_topk_mlp_flop_rule(site: Site) -> int:
+    """Bill the parent contractions while retaining one alive deficit per group."""
+
+    if len(site.in_shapes) not in (5, 10):
+        raise FlopError(
+            f"unexpected low-overhead fuzzy boundary shapes: {site.in_shapes}"
+        )
+    x_shape = site.in_shapes[0]
+    up_shape = site.in_shapes[1]
+    if len(x_shape) < 2 or len(up_shape) != 2 or up_shape[0] != x_shape[-1]:
+        raise FlopError(f"unexpected low-overhead fuzzy operands: {site.in_shapes}")
+    tokens = math.prod(x_shape[:-1])
+    model_width, hidden_width = up_shape
+    multiplier = 4 if len(site.in_shapes) == 5 else 8
+    return multiplier * tokens * model_width * hidden_width
+
+
 def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
     """Count one training step's algorithmic FLOPs by tracing the model.
 
@@ -2093,9 +2113,9 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
 
     balance_config = FuzzyTopKBalanceConfig(
         top_k=config.mlp_top_k,
+        mode=config.balance_mode,
         temperature=config.balance_temperature,
         alive_margin=config.alive_margin,
-        compute_soft_statistics=config.soft_balance_enabled,
     )
 
     def loss(trainable: Mapping[str, Any]) -> jax.Array:
@@ -2118,6 +2138,10 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
         .with_scope(
             "_balanced_choicewise_fuzzy_topk_mlp",
             balanced_fuzzy_topk_mlp_flop_rule,
+        )
+        .with_scope(
+            "_low_overhead_choicewise_fuzzy_topk_mlp",
+            low_overhead_fuzzy_topk_mlp_flop_rule,
         )
     )
     return count_training_flops(loss, params, rules=rules)
@@ -2332,9 +2356,9 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
         make_mesh_fuzzy_topk_mlp_with_balance(
             config=FuzzyTopKBalanceConfig(
                 top_k=config.mlp_top_k,
+                mode=config.balance_mode,
                 temperature=config.balance_temperature,
                 alive_margin=config.alive_margin,
-                compute_soft_statistics=config.soft_balance_enabled,
             ),
             mesh=mesh,
         )
