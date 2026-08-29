@@ -8,7 +8,7 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 463 runs across twenty studies, laid out as `<study>/<run-name>/`, at full
+— 505 runs across twenty-two studies, laid out as `<study>/<run-name>/`, at full
 recorded resolution. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
@@ -55,6 +55,7 @@ by-product:
 | sparse-autoencoder-eqflop | exact endpoints + compute derivation | — | 0.02 MB |
 | fuzzy-topk-three-arm-ladder | exact endpoints + paired-seed/compute tables | — | 0.03 MB |
 | fuzzy-topk-sparsity-diagnostics | exact mechanism reductions + 40.19 GiB raw vectors | — | 0.02 MB |
+| fuzzy-topk-dead-latent-rejected-paths | exact endpoints + mechanism decisions | — | 0.01 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -123,6 +124,14 @@ inactivity emerges, its layer profile, and the associated within-group
 competition. The study browser carries the one-off interactive distributions:
 dead-layer heatmaps, activation-frequency ridgelines, a draggable-step
 histogram, and positive-frequency quantiles.
+
+`fuzzy-topk-dead-latent-rejected-paths.html` is a static decision report over
+42 new runs split into two rejected paths. Thirty-three balance/homeostasis
+runs culminate in a three-seed frequency-floor scale-up; nine tied-init and
+zero-forward ghost-AuxK runs end at a 60M mechanism rejection. The page uses
+exact endpoints and derived feature-survival reductions, inline SVG, and no
+runtime fetch. Parent runs are referenced from the existing sparsity study by
+exact run ID rather than archived again.
 
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
@@ -206,6 +215,11 @@ The fuzzy TopK sparsity-diagnostics study likewise uses TPU v4 at 4 processes
 and 16 chips for all twelve runs, spanning 60M through 500M without crossing a
 topology boundary.
 
+Both fuzzy TopK dead-latent rejected paths use TPU v4 at 4 processes and 16
+chips for all 42 new runs. The balance scale-up is paired to exact controls on
+that same topology in the already-sealed sparsity study; the ghost path is a
+one-seed 60M mechanism screen.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -227,6 +241,7 @@ topology boundary.
 | [sparse-autoencoder-eqflop](sparse-autoencoder-eqflop.html) | 13 | 60M geometry | dictionary width × retained width at equal algorithmic FLOPs | [`sparse-autoencoder-eqflop-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M) |
 | [fuzzy-topk-three-arm-ladder](fuzzy-topk-three-arm-ladder.html) | 24 | 60M/125M/250M | dense vs fuzzy TopK vs double-fuzzy at matched active FLOPs | [`fuzzy-topk-three-arm-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder) |
 | [fuzzy-topk-sparsity-diagnostics](fuzzy-topk-sparsity-diagnostics.html) | 12 | 60M/125M/250M/500M | per-feature fuzzy TopK activity over training | [`fuzzy-topk-sparsity-diagnostics-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-sparsity-diagnostics-ladder) |
+| [fuzzy-topk-dead-latent-rejected-paths](fuzzy-topk-dead-latent-rejected-paths.html) | 42 | 60M/125M/250M | balance/homeostasis and zero-forward ghost-AuxK | [`fuzzy-topk-balance-homeostasis-rejected`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-balance-homeostasis-rejected), [`fuzzy-topk-ghost-auxk-rejected`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-ghost-auxk-rejected) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
@@ -819,6 +834,35 @@ and
 The archived records retain the final 500M seed's notebook-dependency-only
 `pyproject.toml`/`uv.lock` dirt; trainer, shared tree, config, data, runtime, and
 topology identities are unchanged.
+
+## fuzzy-topk-dead-latent-rejected-paths.html
+
+Forty-two verified runs preserve two attempted responses to late feature death
+without copying the nine parent controls already present in the sparsity
+study.
+
+The 33-run balance/homeostasis path includes 24 one-seed development and gate
+runs plus nine full frequency-floor treatments at 60M, 125M, and 250M over
+seeds 1337--1339. The selected floor acts only on deficient encoder-bias
+entries. It cuts aligned persistent death from 34.42% to 17.68% at 60M and
+35.77% to 20.39% at 125M with validation changes below 0.002 nats. At 250M,
+the reduction shrinks from 33.87% to 29.20%, dead groups rise from 8.31% to
+8.80%, and validation worsens by 0.01133. The intervention balances winners
+but does not robustly preserve whole positive groups, so the path is rejected
+as a scale-general solution.
+
+The nine-run ghost-AuxK path contains five 120-step systems gates and four
+step-900 mechanism screens at 60M seed 1350. Relative to tied initialization
+alone, admitted zero-forward ghost coefficients reduce persistent death by
+only 0.29--0.57 percentage points, worsen validation by 0.0058--0.0102, and
+add 11--16% training time. It is rejected before laddering. The path has no
+reconstruction decoder or target and therefore does not test literal SAE
+AuxK; the later reconstruction-decoder experiment is separate.
+
+Both archives carry exact ledgers, full-neuron vectors, compact/full browser
+payloads, launch scripts, source tarballs, and a complete Git bundle for the
+intentionally unmerged research histories. The external parent mapping is
+explicit in the balance analysis JSON.
 
 ## transfer-charts.html
 
