@@ -2,7 +2,7 @@
 set -euo pipefail
 
 study_root=${RIG_RECON_STUDY_ROOT:-/tmp/GPT-speedrun-TPU-fuzzy-reconstruction-auxk}
-artifact_root=${RIG_RECON_RUNS_ROOT:-/run/user/$(id -u)/fuzzy-reconstruction-v4-runs}
+artifact_root=${RIG_RECON_RUNS_ROOT:-${study_root}/runs}
 study_id=fuzzy-topk-reconstruction-auxk-125m-v4-3seed
 suite_path=recipes/fuzzy_topk_reconstruction/study-suite-125m-v4-reconstruction-auxk-3seed.json
 
