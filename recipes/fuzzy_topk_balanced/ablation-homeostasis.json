@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-homeostasis",
-  "status": "low_overhead_gate_accepted_prototype_screen_ready",
+  "status": "token_margin_screen_complete_frequency_floor_ready",
   "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
   "prior_evidence": {
     "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
@@ -224,8 +224,66 @@
         "alive_margin": 0.0
       }
     ],
+    "results": {
+      "neutral": {
+        "validation_loss": 4.426563799381256,
+        "trailing_dead_fraction": 0.35876834753787884,
+        "dead_group_fraction": 0.056699810606060615,
+        "positive_group_rate": 0.09816216677427292,
+        "winner_entropy": 0.6490611416613619
+      },
+      "bias-c0001": {
+        "validation_loss": 4.435566008090973,
+        "trailing_dead_fraction": 0.35462535511363635,
+        "positive_group_rate": 0.09663482010364532,
+        "winner_entropy": 0.857101022470694
+      },
+      "bias-c001": {
+        "validation_loss": 4.4366360902786255,
+        "trailing_dead_fraction": 0.3454367897727273,
+        "positive_group_rate": 0.09616312384605408,
+        "winner_entropy": 0.8746870597712779
+      },
+      "bias-c01": {
+        "validation_loss": 4.440454363822937,
+        "trailing_dead_fraction": 0.33012251420454547,
+        "positive_group_rate": 0.09701886028051376,
+        "winner_entropy": 0.8892692554022116
+      },
+      "alive-c01-m0": {
+        "validation_loss": 4.466995000839233,
+        "trailing_dead_fraction": 0.044182054924242424,
+        "positive_group_rate": 0.3359065353870392,
+        "winner_entropy": 0.502018522502827
+      },
+      "alive-c1-m0": {
+        "validation_loss": 4.528049647808075,
+        "trailing_dead_fraction": 0.023274739583333336,
+        "positive_group_rate": 0.6739472150802612,
+        "winner_entropy": 0.4468899791283063
+      },
+      "alive-c10-m0": {
+        "validation_loss": 4.603467702865601,
+        "trailing_dead_fraction": 0.028438683712121212,
+        "positive_group_rate": 0.9343490600585938,
+        "winner_entropy": 0.42964196725778553
+      },
+      "alive-c1-m01": {
+        "validation_loss": 4.608538031578064,
+        "trailing_dead_fraction": 0.017696496212121212,
+        "positive_group_rate": 0.9274297952651978,
+        "winner_entropy": 0.4448176916721337
+      },
+      "bias-c001-alive-c1-m0": {
+        "validation_loss": 4.529335558414459,
+        "trailing_dead_fraction": 0.007235440340909089,
+        "positive_group_rate": 0.6577385067939758,
+        "winner_entropy": 0.452081926757813
+      }
+    },
     "advance_rule": "Prefer the lowest-complexity declared cell that materially lowers both dead-feature fraction and negative-group incidence versus neutral, preserves within-group winner entropy, and has no catastrophic cross-entropy or gradient-norm regression. Ties are resolved before inspecting other seeds.",
-    "status": "ready_to_launch_low_overhead_cells"
+    "decision": "No token-margin cell advances: survival gains came from raising positive-group rate from 9.8% to 33.6--93.4% and validation worsened monotonically. Hard-bias balance advances only as an optional compositional mechanism because it raised winner entropy to 0.857--0.889 while leaving aggregate activity unchanged, but reduced persistent death by at most 2.9 percentage points.",
+    "status": "complete_no_token_margin_cell_admitted"
   },
   "frequency_floor_screen": {
     "tier": "60m",
@@ -371,7 +429,17 @@
       "alive_c1_low_overhead": "20260829T010512.385597Z-fuzzy_topk_balanced-60m-homeostasis-alive-c1-v2-gate-s1350-1172d9da",
       "bias_c001_plus_alive_c1_low_overhead": "20260829T010802.757159Z-fuzzy_topk_balanced-60m-homeostasis-bias-c001-alive-c1-v2-ga-4c972d75"
     },
-    "prototype_screen": {},
+    "prototype_screen": {
+      "neutral": "20260829T011320.677569Z-fuzzy_topk_balanced-p900-neutral-s1350-001229b7",
+      "bias-c0001": "20260829T011735.896911Z-fuzzy_topk_balanced-p900-bias-c0001-s1350-d9c48965",
+      "bias-c001": "20260829T012153.672332Z-fuzzy_topk_balanced-p900-bias-c001-s1350-d31e91d7",
+      "bias-c01": "20260829T012606.479319Z-fuzzy_topk_balanced-p900-bias-c01-s1350-59dc7eb4",
+      "alive-c01-m0": "20260829T013015.149706Z-fuzzy_topk_balanced-p900-alive-c01-m0-s1350-6d4e54b1",
+      "alive-c1-m0": "20260829T013425.908956Z-fuzzy_topk_balanced-p900-alive-c1-m0-s1350-9df41d53",
+      "alive-c10-m0": "20260829T013838.991377Z-fuzzy_topk_balanced-p900-alive-c10-m0-s1350-5fda985a",
+      "alive-c1-m01": "20260829T014252.479756Z-fuzzy_topk_balanced-p900-alive-c1-m01-s1350-4318720f",
+      "bias-c001-alive-c1-m0": "20260829T014700.652257Z-fuzzy_topk_balanced-p900-bias-c001-alive-c1-s1350-aac5adbd"
+    },
     "mature_ladder": {}
   }
 }

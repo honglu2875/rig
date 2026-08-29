@@ -170,6 +170,17 @@ fraction fell from 1.07% to 0.074% and 0.062%. The combined path also raised
 mean normalized within-group winner entropy from 0.853 to 0.895. These are
 mechanism-gate observations, not endpoint quality evidence.
 
+The paired step-900 screen then separated the mechanisms. Hard-bias balance
+raised normalized winner entropy from 0.649 to 0.857, 0.875, and 0.889 at
+coefficients 0.001, 0.01, and 0.1, while aggregate positive-group activity
+stayed near the neutral 9.8%. Persistent dead fraction improved only from
+35.9% to 35.5%, 34.5%, and 33.0%, respectively. Conversely, the weakest
+per-token survival hinge cut persistent death to 4.4% but raised positive-group
+activity to 33.6% and validation loss from 4.4266 to 4.4670. Stronger hinges
+raised activity to 67--93% and validation loss to 4.5280--4.6085. No per-token
+hinge advances. The activation-frequency floor is the targeted follow-up;
+hard-bias balance remains an optional second mechanism if it composes cleanly.
+
 A treatment advances only if it:
 
 1. completes the standard v4-32 preflights and a 120-step timing/stability gate;
