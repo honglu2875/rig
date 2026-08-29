@@ -140,7 +140,14 @@ loss. Every prototype records full-neuron statistics every 50 steps.
 The first exact Switch-plus-alive systems gate took 22.715 seconds versus
 15.034 seconds neutral, a 51.1% slowdown. It is retained as a rejected systems
 datapoint. That result motivated the retained-deficit and hard-bias paths
-above; they must pass a new paired timing gate before longer screening.
+above. On the exact low-overhead revision, the paired 120-step gate measured
+15.286 seconds neutral, 17.384 seconds alive-only (+13.7%), and 15.203 seconds
+hard-bias-plus-alive (-0.5%). The small negative overhead is timing noise, not a
+speedup claim; both low-overhead paths pass. By step 120, positive-group rate
+rose from 60.0% neutral to 88.8% alive-only and 88.0% combined, while mean dead
+fraction fell from 1.07% to 0.074% and 0.062%. The combined path also raised
+mean normalized within-group winner entropy from 0.853 to 0.895. These are
+mechanism-gate observations, not endpoint quality evidence.
 
 A treatment advances only if it:
 

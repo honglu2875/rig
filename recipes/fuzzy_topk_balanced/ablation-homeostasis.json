@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-homeostasis",
-  "status": "soft_gate_rejected_low_overhead_implementation_validated_cpu",
+  "status": "low_overhead_gate_accepted_prototype_screen_ready",
   "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
   "prior_evidence": {
     "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
@@ -68,9 +68,40 @@
         "validation_loss": 6.2834,
         "slowdown_percent": 51.09,
         "decision": "rejected for the long prototype screen"
+      },
+      "neutral_low_overhead_revision": {
+        "run_id": "20260829T010222.512307Z-fuzzy_topk_balanced-60m-homeostasis-neutral-v2-gate-s1350-4d9cc097",
+        "train_seconds": 15.286135612986982,
+        "tokens_per_second": 1028948.0872220622,
+        "validation_loss": 6.289775788784027,
+        "mean_dead_fraction_step_120": 0.010683001893939394,
+        "mean_positive_group_rate_step_120": 0.6001044,
+        "mean_normalized_winner_entropy_step_120": 0.8529606388408084
+      },
+      "alive_c1_low_overhead": {
+        "run_id": "20260829T010512.385597Z-fuzzy_topk_balanced-60m-homeostasis-alive-c1-v2-gate-s1350-1172d9da",
+        "train_seconds": 17.383958159945905,
+        "tokens_per_second": 904778.9838933289,
+        "validation_loss": 6.330525636672974,
+        "slowdown_percent": 13.723694464522662,
+        "mean_dead_fraction_step_120": 0.0007398200757575756,
+        "mean_positive_group_rate_step_120": 0.8883037,
+        "mean_normalized_winner_entropy_step_120": 0.887797334228204,
+        "decision": "accepted for the long prototype screen"
+      },
+      "bias_c001_plus_alive_c1_low_overhead": {
+        "run_id": "20260829T010802.757159Z-fuzzy_topk_balanced-60m-homeostasis-bias-c001-alive-c1-v2-ga-4c972d75",
+        "train_seconds": 15.203328568022698,
+        "tokens_per_second": 1034552.3961826487,
+        "validation_loss": 6.289543151855469,
+        "slowdown_percent": -0.5417134000429202,
+        "mean_dead_fraction_step_120": 0.0006214488636363636,
+        "mean_positive_group_rate_step_120": 0.87968594,
+        "mean_normalized_winner_entropy_step_120": 0.8954646675504329,
+        "decision": "accepted for the long prototype screen; negative measured overhead is treated as noise"
       }
     },
-    "status": "soft_gate_rejected_low_overhead_gates_pending"
+    "status": "low_overhead_accepted_soft_objective_rejected"
   },
   "prototype_screen": {
     "tier": "60m",
@@ -190,7 +221,7 @@
       }
     ],
     "advance_rule": "Prefer the lowest-complexity declared cell that materially lowers both dead-feature fraction and negative-group incidence versus neutral, preserves within-group winner entropy, and has no catastrophic cross-entropy or gradient-norm regression. Ties are resolved before inspecting other seeds.",
-    "status": "pending"
+    "status": "ready_to_launch_low_overhead_cells"
   },
   "tiers": {
     "60m": {
@@ -268,7 +299,10 @@
   "run_ids": {
     "throughput_gate": {
       "neutral": "20260829T004116.855967Z-fuzzy_topk_balanced-60m-homeostasis-neutral-gate-s1350-fa3ae20f",
-      "exact_switch_plus_alive": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb"
+      "exact_switch_plus_alive": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb",
+      "neutral_low_overhead_revision": "20260829T010222.512307Z-fuzzy_topk_balanced-60m-homeostasis-neutral-v2-gate-s1350-4d9cc097",
+      "alive_c1_low_overhead": "20260829T010512.385597Z-fuzzy_topk_balanced-60m-homeostasis-alive-c1-v2-gate-s1350-1172d9da",
+      "bias_c001_plus_alive_c1_low_overhead": "20260829T010802.757159Z-fuzzy_topk_balanced-60m-homeostasis-bias-c001-alive-c1-v2-ga-4c972d75"
     },
     "prototype_screen": {},
     "mature_ladder": {}
