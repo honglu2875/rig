@@ -34,6 +34,12 @@ run_cell() {
   local seed=$4
   local stop_after=$5
 
+  if ((${#name} > 40)); then
+    printf 'ERROR: run name exceeds the harness 40-character limit: %s\n' \
+      "${name}" >&2
+    return 1
+  fi
+
   shopt -s nullglob
   local completed=("${artifact_root}"/*-"${name}"-*/result.json)
   local attempts=("${artifact_root}"/*-"${name}"-*)
@@ -134,7 +140,7 @@ run_cell \
   120
 run_cell \
   fuzzy_topk_reconstruction_auxk \
-  125m-v4-reconstruction-auxk-gate-v2-s1350 \
+  125m-v4-reconstruction-auxk-gate-v2-s135 \
   gate-v2-reconstruction-auxk-s1350 \
   1350 \
   120

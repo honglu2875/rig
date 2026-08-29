@@ -26,7 +26,7 @@ def one(pattern: str) -> dict:
 
 
 reconstruction = one("*-125m-v4-reconstruction-gate-v2-s1350-*")
-auxk = one("*-125m-v4-reconstruction-auxk-gate-v2-s1350-*")
+auxk = one("*-125m-v4-reconstruction-auxk-gate-v2-s135-*")
 
 for label, result in (("reconstruction", reconstruction), ("auxk", auxk)):
     metrics = result["metrics"]
