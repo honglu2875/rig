@@ -59,3 +59,8 @@ metric	18	fuzzy.winner_frequency
 metric	19	fuzzy.activation_frequency
 metric	20	fuzzy.activation_mean
 metric	21	fuzzy.activation_rms
+metric	22	fuzzy_reconstruction.nmse
+metric	23	fuzzy_reconstruction.auxk_nmse
+metric	24	fuzzy_reconstruction.auxk_positive_fraction
+metric	25	fuzzy_auxk.batch_active_fraction
+metric	26	fuzzy_auxk.tracked_dead_fraction

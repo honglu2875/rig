@@ -122,6 +122,14 @@ _AXES_AND_SCALARS = (
     Metric(19, "fuzzy.activation_frequency"),
     Metric(20, "fuzzy.activation_mean"),
     Metric(21, "fuzzy.activation_rms"),
+    # Train-only sparse-autoencoder decoder objectives. NMSE values use the
+    # exact global-batch centered target energy as their denominator.
+    Metric(22, "fuzzy_reconstruction.nmse"),
+    Metric(23, "fuzzy_reconstruction.auxk_nmse"),
+    Metric(24, "fuzzy_reconstruction.auxk_positive_fraction"),
+    # Main-path liveness state used only by literal reconstruction AuxK.
+    Metric(25, "fuzzy_auxk.batch_active_fraction"),
+    Metric(26, "fuzzy_auxk.tracked_dead_fraction"),
 )
 
 _DIAGNOSTIC_FAMILY_BASES = (("param", 100), ("grad", 200), ("update", 300))
