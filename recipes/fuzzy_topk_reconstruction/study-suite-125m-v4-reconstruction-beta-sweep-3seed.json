@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-reconstruction-beta-sweep-125m-v4-3seed",
+  "status": "predeclared",
+  "objective": "Measure the validation-quality and activation-frequency tradeoff as the train-only input-reconstruction loss is weakened over a powers-of-four coefficient sweep.",
+  "comparison_policy": "Reuse the already-complete beta=0 fuzzy parent and beta=1 reconstruction endpoints. Launch only beta=1/4, 1/16, and 1/64 at the same three paired seeds. Do not select or stop cells from intermediate loss or sparsity observations.",
+  "gradient_interpretation": "For shared encoder parameters, beta scales the reconstruction contribution in grad(cross_entropy + beta * reconstruction_nmse). Parameters private to W_rec receive only the scaled reconstruction gradient, whose physical Adam update need not shrink proportionally because of adaptive normalization; W_rec is discarded at deployment.",
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "tier": "125m",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "layers": 11,
+    "d_model": 640,
+    "mlp_width": 10240,
+    "top_k": 2560,
+    "group_size": 4,
+    "schedule_steps": 4656,
+    "training_tokens": 610271232,
+    "sparsity_diagnostics_every": 100,
+    "sparsity_capture_steps": "step 1, every 100 steps, and exact final step",
+    "checkpoint_policy": "none",
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804"
+  },
+  "source": {
+    "parent_study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "beta_one_study": "fuzzy-topk-reconstruction-auxk-125m-v4-3seed",
+    "beta_one_suite": "recipes/fuzzy_topk_reconstruction/study-suite-125m-v4-reconstruction-auxk-3seed.json",
+    "treatment_implementation_commit": "8ac1c03e428153887dc28bfea4986d0affc8420d",
+    "treatment_branch": "research/fuzzy-topk-reconstruction-auxk"
+  },
+  "arms": [
+    {
+      "id": "beta-0-parent",
+      "recipe": "fuzzy_topk_autoencoder",
+      "status": "reuse_complete_verified",
+      "reconstruction_coefficient": 0.0,
+      "train_only_parameter_count": 0,
+      "run_ids": {
+        "1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+        "1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+        "1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79"
+      },
+      "validation_loss_by_seed": {
+        "1337": 3.591915398836136,
+        "1338": 3.581060439348221,
+        "1339": 3.584172636270523
+      }
+    },
+    {
+      "id": "beta-1",
+      "recipe": "fuzzy_topk_reconstruction",
+      "status": "reuse_complete_verified",
+      "reconstruction_coefficient": 1.0,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880,
+      "run_ids": {
+        "1337": "20260829T172612.351718Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1337-8f811907",
+        "1338": "20260829T184359.087601Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1338-f934ed13",
+        "1339": "20260829T190808.764562Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1339-b813960f"
+      },
+      "validation_loss_by_seed": {
+        "1337": 3.610807329416275,
+        "1338": 3.6011607944965363,
+        "1339": 3.6120437383651733
+      }
+    },
+    {
+      "id": "beta-1of4",
+      "recipe": "fuzzy_topk_reconstruction",
+      "status": "nine_cell_queue_contains_three_endpoints",
+      "reconstruction_coefficient": 0.25,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880
+    },
+    {
+      "id": "beta-1of16",
+      "recipe": "fuzzy_topk_reconstruction",
+      "status": "nine_cell_queue_contains_three_endpoints",
+      "reconstruction_coefficient": 0.0625,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880
+    },
+    {
+      "id": "beta-1of64",
+      "recipe": "fuzzy_topk_reconstruction",
+      "status": "nine_cell_queue_contains_three_endpoints",
+      "reconstruction_coefficient": 0.015625,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880
+    }
+  ],
+  "systems_gate": {
+    "required": false,
+    "reason": "The recipe implementation, tensor shapes, topology, data, and observer already passed two systems gates and six full endpoints. This study changes only a finite scalar loss coefficient."
+  },
+  "metrics": {
+    "primary": [
+      "canonical validation loss by paired seed",
+      "validation-loss delta versus beta=0 and beta=1"
+    ],
+    "activation_frequency": [
+      "final sampled-batch dead-feature fraction by layer",
+      "dead-feature fraction across the final ten aligned captures",
+      "positive activation-frequency quantiles by layer",
+      "per-layer activation-frequency Gini and high-frequency tail",
+      "positive-group fraction and within-group winner entropy"
+    ],
+    "reconstruction": [
+      "reconstruction NMSE by layer and step"
+    ],
+    "systems": [
+      "tokens per second",
+      "train and compile seconds",
+      "issued FLOPs per token"
+    ]
+  },
+  "launch_policy": "Launch only the nine missing lower-beta endpoints. Use a Latin-square arm order across seeds so each coefficient appears once in each queue position. Every admitted cell runs the complete 4656-step schedule.",
+  "queue_order": [
+    "beta-1of4-s1337",
+    "beta-1of16-s1337",
+    "beta-1of64-s1337",
+    "beta-1of16-s1338",
+    "beta-1of64-s1338",
+    "beta-1of4-s1338",
+    "beta-1of64-s1339",
+    "beta-1of4-s1339",
+    "beta-1of16-s1339"
+  ],
+  "stopping_rule": "Any systems or artifact-validation failure stops the sequential queue for inspection. Never retry automatically after an incomplete attempt.",
+  "evidence_boundary": "This is a paired three-seed dose-response study at 125M on one v4-32 topology. It can locate a 125M quality-utilization frontier but cannot establish coefficient transfer across model scale."
+}

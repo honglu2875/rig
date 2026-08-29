@@ -158,6 +158,23 @@ one typed schema. Runtime research overrides are
 `--fuzzy-dead-tokens-threshold`. The resolved `aux_k` must be integral and
 divide `K`; reconstruction requires the choicewise backend.
 
+## Predeclared reconstruction-weight sweep
+
+The 125M v4-32 dose-response study in
+[`study-suite-125m-v4-reconstruction-beta-sweep-3seed.json`](study-suite-125m-v4-reconstruction-beta-sweep-3seed.json)
+reuses the completed `beta_rec=0` parent and `beta_rec=1` endpoints, then runs
+only `beta_rec` values `1/4`, `1/16`, and `1/64` at paired seeds 1337--1339.
+All other scientific coordinates remain fixed. The sweep retains the full
+per-feature activation-frequency observer at cadence 100 and is launched by
+[`launch_v4_125m_beta_sweep_3seed.sh`](launch_v4_125m_beta_sweep_3seed.sh).
+
+For parameters shared with the language path, lowering `beta_rec` directly
+reduces the reconstruction term in the summed gradient. For the train-only
+decoder, whose gradient has no language component, Adam's adaptive
+normalization means a smaller raw gradient does not promise a proportionally
+smaller parameter update. The decoder is discarded; the study's intended dose
+is the reconstruction pressure on the deployed feature encoder.
+
 ## Reproduction checks
 
 ```bash
