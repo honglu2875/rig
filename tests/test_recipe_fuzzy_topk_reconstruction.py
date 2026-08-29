@@ -51,6 +51,10 @@ def resolved(module, profile: str = "smoke", *overrides: str):
 
 
 class FuzzyTopKReconstructionRecipeTests(unittest.TestCase):
+    def test_result_schema_matches_the_harness_contract(self) -> None:
+        self.assertEqual(reconstruction.SCHEMA_VERSION, 1)
+        self.assertEqual(auxk.SCHEMA_VERSION, 1)
+
     def test_separate_arm_defaults_and_plan_contracts(self) -> None:
         rec = resolved(reconstruction, "dev", "--tier", "60m")
         treatment = resolved(auxk, "dev", "--tier", "60m")

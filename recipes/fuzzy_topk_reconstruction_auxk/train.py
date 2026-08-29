@@ -183,7 +183,7 @@ from rig.kernels import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 RECIPE_DIR = Path(__file__).resolve().parent
 RECIPE_NAME = RECIPE_DIR.name
 _VALID_PROFILES = ("smoke", "dev", "official")
