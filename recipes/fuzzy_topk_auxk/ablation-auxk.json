@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-paper-inspired-dead-feature-recovery",
-  "status": "systems_gate_complete_mechanism_screen_pending",
+  "status": "mechanism_screen_complete_no_paper_cell_admitted",
   "objective": "Compare parent fuzzy Top-K, the selected activation-frequency floor, and a paper-inspired tied-initialization plus dead-feature ghost-gradient treatment on identical 60M/125M/250M ladder coordinates.",
   "paper": {
     "title": "Scaling and evaluating sparse autoencoders",
@@ -200,8 +200,67 @@
       "measured training time"
     ],
     "selection_rule": "Choose the weakest ghost coefficient that materially improves persistent death beyond tied-only without a material validation regression. Tied-only remains a mechanism ablation and cannot be silently folded into the ghost effect.",
-    "results": {},
-    "status": "not_started"
+    "results": {
+      "parent-init-no-ghost": {
+        "run_id": "20260829T102623.461749Z-fuzzy_topk_auxk-60m-auxk-p900-parent-init-no-ghost-s1350-e9466212",
+        "verified": true,
+        "train_seconds": 106.98018307308666,
+        "tokens_per_second": 1102678.987933764,
+        "train_loss": 4.454296588897705,
+        "validation_loss": 4.426563799381256,
+        "final_batch_dead_fraction": 0.3677793560606061,
+        "trailing_persistent_dead_fraction": 0.3587683475378788,
+        "final_dead_group_fraction": 0.05669981060606061,
+        "final_positive_group_rate": 0.09816216677427292,
+        "final_winner_entropy": 0.6490611416613621
+      },
+      "tied-init-no-ghost": {
+        "run_id": "20260829T103036.917878Z-fuzzy_topk_auxk-60m-auxk-p900-tied-init-no-ghost-s1350-de5beaac",
+        "verified": true,
+        "train_seconds": 108.43988909106702,
+        "tokens_per_second": 1087835.8599291267,
+        "train_loss": 4.483163833618164,
+        "validation_loss": 4.449376046657562,
+        "final_batch_dead_fraction": 0.3614464962121212,
+        "trailing_persistent_dead_fraction": 0.3524798768939394,
+        "final_dead_group_fraction": 0.031782670454545456,
+        "final_positive_group_rate": 0.09065664559602737,
+        "final_winner_entropy": 0.6641883094316222
+      },
+      "tied-ghost-c00078125": {
+        "run_id": "20260829T103446.992198Z-fuzzy_topk_auxk-60m-auxk-p900-tied-ghost-c00078125-s1350-35ca7ebc",
+        "verified": true,
+        "train_seconds": 118.92497645691037,
+        "tokens_per_second": 991926.2001514185,
+        "train_loss": 4.479305744171143,
+        "validation_loss": 4.4551262855529785,
+        "final_batch_dead_fraction": 0.35890151515151514,
+        "trailing_persistent_dead_fraction": 0.3495797821969697,
+        "final_dead_group_fraction": 0.029415246212121212,
+        "final_positive_group_rate": 0.09205638617277145,
+        "final_winner_entropy": 0.6689837485913026,
+        "final_tracked_dead_fraction": 0.33504971861839294,
+        "admitted_to_ladder": false
+      },
+      "tied-ghost-c003125": {
+        "run_id": "20260829T103924.382319Z-fuzzy_topk_auxk-60m-auxk-p900-tied-ghost-c003125-s1350-807be799",
+        "verified": true,
+        "train_seconds": 118.9980865221005,
+        "tokens_per_second": 991316.780359249,
+        "train_loss": 4.4831438064575195,
+        "validation_loss": 4.459597647190094,
+        "final_batch_dead_fraction": 0.35640092329545453,
+        "trailing_persistent_dead_fraction": 0.3467684659090909,
+        "final_dead_group_fraction": 0.030184659090909092,
+        "final_positive_group_rate": 0.09343647211790085,
+        "final_winner_entropy": 0.6674024206765277,
+        "final_tracked_dead_fraction": 0.33161696791648865,
+        "admitted_to_ladder": false
+      }
+    },
+    "decision": "No ghost cell advances. Relative to tied-only, 1/128 lowers trailing persistent death by only 0.290 percentage points and regresses validation by 0.00575; 1/32 lowers it by only 0.571 points and regresses validation by 0.01022. These are monotonic but not material recovery effects, especially against the approximately ten-point improvement of the existing frequency-floor arm.",
+    "selected": null,
+    "status": "complete_no_mature_cell_admitted"
   },
   "tiers": {
     "60m": {
@@ -282,7 +341,7 @@
         "recipe": "fuzzy_topk_auxk",
         "initialization": "tied_directions",
         "training_only_signal": "selected declared ghost cell",
-        "status": "not_admitted",
+        "status": "not_admitted_after_mechanism_screen",
         "run_ids": {}
       }
     },
@@ -295,6 +354,6 @@
     },
     "launch_policy": "After selecting one declared mature paper cell and passing the 250M feasibility gate, launch its nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
     "stopping_rule": "Every admitted cell runs its complete explicit cosine schedule. A systems failure pauses the sequential queue for inspection.",
-    "status": "paper_arm_not_admitted"
+    "status": "paper_arm_screen_failed_no_ladder_queued"
   }
 }

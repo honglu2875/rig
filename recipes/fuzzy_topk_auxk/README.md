@@ -171,10 +171,30 @@ because it narrowly exceeds the predeclared 25% wall-time ceiling; no
 scientific metric was used to stop or retry it. The other four cells proceed
 to the fixed 900-step mechanism screen.
 
-The selected paper arm then receives one 250M 120-step feasibility run. Only
-after that succeeds are seeds 1337--1339 queued sequentially at 60M, 125M, and
-250M. Scientific intermediate metrics never trigger retries or early stopping;
-systems failure pauses the queue for inspection.
+The mechanism screen completed with the following final-window measurements:
+
+| cell | persistent dead | dead groups | positive groups | winner entropy | validation |
+|---|---:|---:|---:|---:|---:|
+| independent, no ghost | 35.88% | 5.67% | 9.82% | 0.649 | 4.4266 |
+| tied, no ghost | 35.25% | 3.18% | 9.07% | 0.664 | 4.4494 |
+| tied, ghost `1/128` | 34.96% | 2.94% | 9.21% | 0.669 | 4.4551 |
+| tied, ghost `1/32` | 34.68% | 3.02% | 9.34% | 0.667 | 4.4596 |
+
+Here persistent death means a feature has zero positive activation frequency
+in all three predeclared captures at steps 800, 850, and 900. Tied
+initialization accounts for most of the small survival change. Incrementally,
+`1/128` and `1/32` improve persistent death by only 0.29 and 0.57 percentage
+points versus tied-only, while validation regresses by 0.0058 and 0.0102. No
+ghost cell therefore satisfies the mature-cell selection rule. The 250M gate
+and nine paper-arm ladder runs are deliberately not queued; the completed
+screen is retained as a negative result.
+
+Under the protocol, a selected paper arm would next receive one 250M 120-step
+feasibility run. Only after that succeeded would seeds 1337--1339 be queued
+sequentially at 60M, 125M, and 250M. Because no cell passed the mechanism
+screen, that conditional stage was not reached. Scientific intermediate
+metrics never trigger retries or early stopping; systems failure pauses the
+queue for inspection.
 
 ## CLI
 
