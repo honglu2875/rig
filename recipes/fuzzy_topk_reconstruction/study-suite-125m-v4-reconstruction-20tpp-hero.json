@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-reconstruction-20tpp-hero-125m-v4",
+  "status": "predeclared",
+  "objective": "Test whether the best positive reconstruction coefficient from the paired 125M sweep transfers to a held-out-seed, dense-equivalent 20-TPP horizon against the matched 8k dense reference.",
+  "selection": {
+    "source_study": "fuzzy-topk-reconstruction-beta-sweep-125m-v4-3seed",
+    "eligible_reconstruction_coefficients": [0.015625, 0.0625, 0.25, 1.0],
+    "required_seeds_per_coefficient": [1337, 1338, 1339],
+    "metric": "arithmetic mean of canonical final dev validation loss",
+    "direction": "lower is better",
+    "tie_break": "smaller reconstruction coefficient",
+    "completion_rule": "Select only after every one of the twelve positive-coefficient endpoints is complete and passes rig verify. Never use intermediate losses or the held-out hero seed for selection.",
+    "exclusion": "beta_rec=0 is the no-reconstruction control and is not eligible to be called the best positive reconstruction coefficient."
+  },
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "official",
+    "tier": "125m",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "seed": 1350,
+    "seed_role": "held out from coefficient selection and paired across hero arms",
+    "target_dense_tokens_per_parameter": 20.0,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "checkpoint_policy": "none",
+    "final_validation_predictions": 10485760,
+    "validation_probe_every_steps": 500,
+    "validation_probe_predictions": 1048576
+  },
+  "arms": [
+    {
+      "id": "dense-reference-20tpp",
+      "recipe": "reference",
+      "layers": 12,
+      "d_model": 640,
+      "heads": 10,
+      "mlp_width": 2560,
+      "parameter_count": 123456640,
+      "schedule_steps": 18838,
+      "training_tokens": 2469134336,
+      "achieved_tokens_per_parameter": 20.00001244161513,
+      "active_flops_per_token": 1371014400,
+      "total_active_flops": 3385218730190438400,
+      "reconstruction_coefficient": 0.0
+    },
+    {
+      "id": "selected-reconstruction-20tpp",
+      "recipe": "fuzzy_topk_reconstruction",
+      "selection": "resolved after the source sweep by the declared rule",
+      "layers": 11,
+      "d_model": 640,
+      "heads": 10,
+      "mlp_width": 10240,
+      "top_k": 2560,
+      "group_size": 4,
+      "deployment_parameter_count": 226753280,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880,
+      "schedule_steps": 18624,
+      "training_tokens": 2441084928,
+      "reported_stored_parameter_tpp": 10.765378688237718,
+      "deployment_active_flops_per_token": 1386743040,
+      "total_deployment_active_flops": 3385157533952901120,
+      "issued_training_flops_per_token": 2359952640,
+      "total_issued_training_flops": 5760844820297809920,
+      "auxk_mode": "none",
+      "sparsity_diagnostics_every": 100
+    }
+  ],
+  "budget": {
+    "basis": "The dense reference uses the repository's exact 20-TPP horizon. The sparse treatment is rounded to the same total deployed active matrix-FLOP budget, preserving the original ladder's equi-active-compute comparison. Because the sparse arm stores a 16D dictionary, its literal stored-parameter TPP is 10.7654; 20 TPP here is explicitly dense-equivalent active-compute TPP.",
+    "relative_deployment_active_flop_mismatch": -0.0000180775,
+    "physical_training_compute_caveat": "The train-only reconstruction decoder and choicewise implementation make treatment training issue about 1.70176 times the dense reference's matrix FLOPs. This systems cost is reported and does not shorten the scientific learning horizon."
+  },
+  "source": {
+    "treatment_implementation_commit": "8ac1c03e428153887dc28bfea4986d0affc8420d",
+    "sweep_predeclaration_commit": "3082bb942f261d625c34dabfbf0f738aaf8b12fa",
+    "branch": "research/fuzzy-topk-reconstruction-auxk"
+  },
+  "systems_gate": {
+    "required": false,
+    "reason": "Both exact implementations and the v4-32 topology have completed full endpoints. The hero changes only schedule duration and a coefficient selected from already admitted finite values. Full official-profile doctor checks still run immediately before the pair."
+  },
+  "launch_policy": "Wait for and verify the complete coefficient sweep, materialize a deterministic selection ledger, run the dense reference first, then run the selected reconstruction treatment. Any missing, duplicate, failed, or unverifiable artifact stops the queue; never retry automatically after an incomplete attempt.",
+  "primary_metric": "canonical official final validation loss on 10,485,760 predictions",
+  "secondary_metrics": [
+    "validation-loss trajectory from fixed official probes",
+    "per-feature activation-frequency trajectories for the treatment",
+    "final and recent-window dead-feature fraction by layer",
+    "positive activation-frequency quantiles and high-frequency tail",
+    "tokens per second and physical issued FLOPs"
+  ],
+  "evidence_boundary": "This is one held-out seed at one model size. It is a long-horizon hero comparison, not a multi-seed confirmation or a coefficient re-selection at 20 TPP."
+}

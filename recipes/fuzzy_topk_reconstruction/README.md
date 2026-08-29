@@ -175,6 +175,22 @@ normalization means a smaller raw gradient does not promise a proportionally
 smaller parameter update. The decoder is discarded; the study's intended dose
 is the reconstruction pressure on the deployed feature encoder.
 
+## Predeclared 20-TPP hero pair
+
+[`study-suite-125m-v4-reconstruction-20tpp-hero.json`](study-suite-125m-v4-reconstruction-20tpp-hero.json)
+promotes one positive coefficient only after all three-seed sweep endpoints
+finish. Selection minimizes three-seed mean final dev validation loss, with a
+smaller-coefficient tie break. The 20-TPP comparison uses held-out seed 1350
+for both the 8k dense reference and selected reconstruction treatment.
+
+The dense arm runs its exact 18,838-step fixed-TPP horizon. The sparse arm runs
+18,624 steps, matching the dense arm's total deployed active matrix FLOPs to
+within 0.002%; its train-only reconstruction decoder's physical work remains
+reported rather than being used to shorten the learning horizon. The treatment
+retains per-feature activation-frequency captures every 100 steps. The
+dependent, fail-closed queue is
+[`launch_v4_125m_20tpp_hero.sh`](launch_v4_125m_20tpp_hero.sh).
+
 ## Reproduction checks
 
 ```bash
