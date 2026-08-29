@@ -181,6 +181,17 @@ raised activity to 67--93% and validation loss to 4.5280--4.6085. No per-token
 hinge advances. The activation-frequency floor is the targeted follow-up;
 hard-bias balance remains an optional second mechanism if it composes cleanly.
 
+The frequency-floor gate added no measurable training overhead: standalone
+took 15.02 seconds and the hard-bias composition 16.93 seconds versus 16.55
+seconds neutral. In the step-900 grid, the weakest standalone floor
+(`alive_coefficient=0.1`, `alive_target=0.1`) is the mature treatment. It lowers
+trailing persistent death from 35.9% to 25.8%, raises winner entropy from 0.649
+to 0.691, leaves positive-group activity effectively unchanged (9.93% versus
+9.82%), and slightly improves validation from 4.4266 to 4.4239. Stronger
+coefficients, a 20% target, and hard-bias composition all regressed either
+survival or validation. The result is therefore a weak homeostatic regularizer,
+not a hard frequency constraint.
+
 A treatment advances only if it:
 
 1. completes the standard v4-32 preflights and a 120-step timing/stability gate;
@@ -204,11 +215,11 @@ window or remains useful as a separate continuation.
 
 ```bash
 uv run rig run fuzzy_topk_balanced --cluster v4-32 --profile dev \
-  --tier 60m --seed 1337 --name 60m-switch-c001-s1337 \
+  --tier 60m --seed 1337 --name 60m-frequency-c01-rho01-s1337 \
   -- --sparse-layers 11 --sparse-top-k 1536 \
   --sparse-training-steps 2316 \
-  --fuzzy-balance-mode switch --fuzzy-balance-coefficient 0.01 \
-  --sparsity-diagnostics-every 10
+  --fuzzy-alive-mode frequency_floor --fuzzy-alive-coefficient 0.1 \
+  --fuzzy-alive-target 0.1 --sparsity-diagnostics-every 20
 ```
 
 `--fuzzy-balance-mode` is `none`, `switch`, `importance`, or `bias`.

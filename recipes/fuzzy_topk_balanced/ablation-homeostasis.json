@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-homeostasis",
-  "status": "token_margin_screen_complete_frequency_floor_ready",
+  "status": "mature_frequency_floor_selected_waiting_250m_gate",
   "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
   "prior_evidence": {
     "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
@@ -293,6 +293,32 @@
     "sparsity_diagnostics_every": 50,
     "timing_gate_stop_after_step": 120,
     "selection_window": "last three captures through step 900",
+    "timing_gate": {
+      "neutral": {
+        "train_seconds": 16.551262652035803,
+        "validation_loss": 6.289775788784027,
+        "dead_fraction": 0.010683001893939394,
+        "positive_group_rate": 0.6001043915748596,
+        "winner_entropy": 0.8529606388408084
+      },
+      "frequency-c1-rho01": {
+        "train_seconds": 15.02308818208985,
+        "validation_loss": 6.292913556098938,
+        "dead_fraction": 0.004927201704545455,
+        "positive_group_rate": 0.6250772476196289,
+        "winner_entropy": 0.8757120122762589,
+        "decision": "accepted; negative measured overhead versus neutral is timing noise"
+      },
+      "bias-c01-frequency-c1-rho01": {
+        "train_seconds": 16.933375077089295,
+        "slowdown_percent": 2.309,
+        "validation_loss": 6.257500052452087,
+        "dead_fraction": 0.005223129734848484,
+        "positive_group_rate": 0.6147142052650452,
+        "winner_entropy": 0.8787356780821206,
+        "decision": "accepted for the declared screen"
+      }
+    },
     "declared_cells": [
       {
         "id": "frequency-c01-rho01",
@@ -344,8 +370,73 @@
         "admission": "run only after the standalone floor grid; hard-bias 0.1 is the strongest declared choice-balancing prototype"
       }
     ],
+    "results": {
+      "frequency-c01-rho01": {
+        "validation_loss": 4.423897564411163,
+        "dead_fraction": 0.30322265625,
+        "trailing_dead_fraction": 0.25828598484848486,
+        "dead_group_fraction": 0.03864820075757576,
+        "positive_group_rate": 0.09929795563220978,
+        "winner_entropy": 0.6905751481763459,
+        "train_seconds": 112.14925803989172
+      },
+      "frequency-c1-rho005": {
+        "validation_loss": 4.425391674041748,
+        "dead_fraction": 0.2911931818181818,
+        "trailing_dead_fraction": 0.259765625,
+        "dead_group_fraction": 0.03557054924242425,
+        "positive_group_rate": 0.10150133818387985,
+        "winner_entropy": 0.703072155947571,
+        "train_seconds": 113.48051827098243
+      },
+      "frequency-c1-rho01": {
+        "validation_loss": 4.435837626457214,
+        "dead_fraction": 0.31510416666666663,
+        "trailing_dead_fraction": 0.28417968750000006,
+        "dead_group_fraction": 0.0448626893939394,
+        "positive_group_rate": 0.09998249262571335,
+        "winner_entropy": 0.6867396092054802,
+        "train_seconds": 112.28134276415221
+      },
+      "frequency-c1-rho02": {
+        "validation_loss": 4.445957660675049,
+        "dead_fraction": 0.34011008522727276,
+        "trailing_dead_fraction": 0.31429036458333337,
+        "dead_group_fraction": 0.05350378787878789,
+        "positive_group_rate": 0.10391699522733688,
+        "winner_entropy": 0.6719239380764789,
+        "train_seconds": 110.25621347804554
+      },
+      "frequency-c10-rho01": {
+        "validation_loss": 4.430814743041992,
+        "dead_fraction": 0.33750591856060613,
+        "trailing_dead_fraction": 0.30187618371212116,
+        "dead_group_fraction": 0.05385890151515151,
+        "positive_group_rate": 0.10047562420368195,
+        "winner_entropy": 0.6743600679027107,
+        "train_seconds": 110.21724631404504
+      },
+      "bias-c01-frequency-c1-rho01": {
+        "validation_loss": 4.435309529304504,
+        "dead_fraction": 0.3212890625,
+        "trailing_dead_fraction": 0.29902047821969696,
+        "dead_group_fraction": 0.04699337121212121,
+        "positive_group_rate": 0.09897059947252274,
+        "winner_entropy": 0.7157444424640086,
+        "train_seconds": 112.50891227996908
+      }
+    },
     "advance_rule": "Prefer a target near the parent aggregate positive-group rate that materially lowers persistent dead-feature fraction without making positive-group activity substantially denser or degrading validation. Coefficient ties favor the weaker intervention. Add hard-bias only if its separate winner-entropy gain composes without a quality regression.",
-    "status": "cpu_validated_waiting_for_tpu_gate"
+    "selected": {
+      "id": "frequency-c01-rho01",
+      "mode": "none",
+      "balance_coefficient": 0.0,
+      "alive_mode": "frequency_floor",
+      "alive_coefficient": 0.1,
+      "alive_target": 0.1,
+      "reason": "It is the weakest intervention, has the best validation and trailing persistent-death result in the declared screen, raises winner entropy, and leaves aggregate positive-group activity at the neutral level. Stronger coefficients, higher targets, and hard-bias composition all regress at least survival or validation."
+    },
+    "status": "complete_mature_cell_selected"
   },
   "tiers": {
     "60m": {
@@ -397,7 +488,14 @@
     "control_policy": "Reuse the verified same-seed parent fuzzy diagnostic runs only after exact scientific-coordinate and source-provenance comparison.",
     "launch_policy": "After selecting and versioning one mature treatment, launch nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
     "stopping_rule": "Each admitted cell runs its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",
-    "status": "blocked_on_prototype_screen"
+    "treatment": {
+      "mode": "none",
+      "balance_coefficient": 0.0,
+      "alive_mode": "frequency_floor",
+      "alive_coefficient": 0.1,
+      "alive_target": 0.1
+    },
+    "status": "selected_waiting_250m_feasibility_gate"
   },
   "optional_extension": {
     "tier": "500m",
@@ -439,6 +537,19 @@
       "alive-c10-m0": "20260829T013838.991377Z-fuzzy_topk_balanced-p900-alive-c10-m0-s1350-5fda985a",
       "alive-c1-m01": "20260829T014252.479756Z-fuzzy_topk_balanced-p900-alive-c1-m01-s1350-4318720f",
       "bias-c001-alive-c1-m0": "20260829T014700.652257Z-fuzzy_topk_balanced-p900-bias-c001-alive-c1-s1350-aac5adbd"
+    },
+    "frequency_timing_gate": {
+      "neutral": "20260829T015607.651696Z-fuzzy_topk_balanced-frequency-gate-neutral-s1350-dfb775a0",
+      "frequency-c1-rho01": "20260829T015850.800021Z-fuzzy_topk_balanced-frequency-gate-c1-rho01-s1350-47aefc7f",
+      "bias-c01-frequency-c1-rho01": "20260829T020134.983963Z-fuzzy_topk_balanced-frequency-gate-bias-c01-c1-rho01-s1350-20e75fee"
+    },
+    "frequency_floor_screen": {
+      "frequency-c01-rho01": "20260829T020441.651585Z-fuzzy_topk_balanced-p900-frequency-c01-rho01-s1350-9cd67ee0",
+      "frequency-c1-rho005": "20260829T020855.015730Z-fuzzy_topk_balanced-p900-frequency-c1-rho005-s1350-8b99d494",
+      "frequency-c1-rho01": "20260829T021312.132380Z-fuzzy_topk_balanced-p900-frequency-c1-rho01-s1350-923be5cc",
+      "frequency-c1-rho02": "20260829T021728.802830Z-fuzzy_topk_balanced-p900-frequency-c1-rho02-s1350-1801f483",
+      "frequency-c10-rho01": "20260829T022142.792339Z-fuzzy_topk_balanced-p900-frequency-c10-rho01-s1350-28200601",
+      "bias-c01-frequency-c1-rho01": "20260829T022550.712241Z-fuzzy_topk_balanced-p900-bias-c01-frequency-c1-rho01-s1350-e2111dbf"
     },
     "mature_ladder": {}
   }
