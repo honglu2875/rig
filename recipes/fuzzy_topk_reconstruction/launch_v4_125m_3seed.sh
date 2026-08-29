@@ -99,14 +99,14 @@ run_cell() {
 # Systems-only seed 1350 gates. These are not endpoint evidence.
 run_cell \
   fuzzy_topk_reconstruction \
-  125m-v4-reconstruction-gate-s1350 \
-  gate-reconstruction-s1350 \
+  125m-v4-reconstruction-gate-v2-s1350 \
+  gate-v2-reconstruction-s1350 \
   1350 \
   120
 run_cell \
   fuzzy_topk_reconstruction_auxk \
-  125m-v4-reconstruction-auxk-gate-s1350 \
-  gate-reconstruction-auxk-s1350 \
+  125m-v4-reconstruction-auxk-gate-v2-s1350 \
+  gate-v2-reconstruction-auxk-s1350 \
   1350 \
   120
 RIG_RECON_RUNS_ROOT="${artifact_root}" \

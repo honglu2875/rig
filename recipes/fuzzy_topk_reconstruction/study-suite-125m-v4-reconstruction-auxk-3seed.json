@@ -32,7 +32,7 @@
   "source": {
     "parent_study": "fuzzy-topk-sparsity-diagnostics-ladder",
     "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json",
-    "treatment_implementation_commit": "3a9fbdc91a290c9841db69e006ac25a6bc1575c9",
+    "treatment_implementation_commit": "8ac1c03e428153887dc28bfea4986d0affc8420d",
     "treatment_branch": "research/fuzzy-topk-reconstruction-auxk"
   },
   "arms": [
@@ -80,9 +80,14 @@
     }
   ],
   "systems_gate": {
+    "attempt": 2,
     "seed": 1350,
     "stop_after_step": 120,
     "endpoint_evidence": false,
+    "run_names": [
+      "125m-v4-reconstruction-gate-v2-s1350",
+      "125m-v4-reconstruction-auxk-gate-v2-s1350"
+    ],
     "required": [
       "finite compilation, training, reconstruction metrics, and validation",
       "no out-of-memory or device failure",
@@ -91,6 +96,23 @@
       "AuxK incremental training-time overhead no more than 15 percent versus reconstruction-only"
     ]
   },
+  "excluded_development_attempts": [
+    {
+      "id": "reconstruction-gate-schema2",
+      "run_id": "20260829T170136.471957Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-gate-s1350-15c6865e",
+      "status": "trainer_complete_harness_rejected",
+      "reason": "The trainer emitted result schema_version 2 while the repository harness requires schema_version 1. Extended reconstruction metrics do not require a schema bump; commit 8ac1c03 restores the harness contract.",
+      "training_steps": 120,
+      "tokens_per_second": 477504.6226144928,
+      "train_seconds": 32.939241328975186,
+      "validation_loss": 6.351879358291626,
+      "reconstruction_nmse": 0.2804035246372223,
+      "sparsity_diagnostic_point_count": 3,
+      "result_json": false,
+      "endpoint_evidence": false,
+      "archive_policy": "Retain as excluded systems-development evidence; never use for endpoint comparisons."
+    }
+  ],
   "full_run_metrics": {
     "primary": [
       "canonical validation loss",
