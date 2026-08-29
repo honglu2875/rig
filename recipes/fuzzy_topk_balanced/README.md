@@ -192,6 +192,15 @@ coefficients, a 20% target, and hard-bias composition all regressed either
 survival or validation. The result is therefore a weak homeostatic regularizer,
 not a hard frequency constraint.
 
+The selected treatment also passed a 250M, 120-step scale gate. It compiled the
+train step in 56.08 seconds, sustained 270.5K tokens/s, and completed training,
+validation, and full-vector sparsity diagnostics without a memory or numerical
+failure. Its 58.16-second training time is 1.9% above the matching parent fuzzy
+cadence-10 diagnostic gate (57.08 seconds). The generic benchmark prints
+`NOT QUALIFIED` because the gate intentionally stops after 120 of 9,402 steps;
+the full-schedule loss threshold is not an admission criterion for this systems
+probe.
+
 A treatment advances only if it:
 
 1. completes the standard v4-32 preflights and a 120-step timing/stability gate;
@@ -203,7 +212,10 @@ A treatment advances only if it:
 The mature treatment is then run for paired seeds 1337--1339 at 60M, 125M, and
 250M, with the original fuzzy per-feature observer at cadence 20. Each capture
 still stores the exact full-neuron vectors, and every retained step aligns with
-the cadence-10 parent controls. Cadence 20 bounds the new nine-run dataset near
+the cadence-10 parent controls. All nine controls were verified complete and
+matched on seed, model coordinates, schedule, data/batch contract, learning
+rate, and choicewise backend; the sealed parent recipe and kernel remain
+unchanged. Cadence 20 bounds the new nine-run dataset near
 6 GB on the 97 GB local volume; cadence 10 would need roughly 12 GB before
 compilation caches. The complete schedule, validation contract, and data order
 stay fixed. A systems failure stops the sequential queue for inspection;

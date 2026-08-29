@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "study_id": "fuzzy-topk-homeostasis",
-  "status": "mature_frequency_floor_selected_waiting_250m_gate",
+  "status": "mature_frequency_floor_ladder_admitted",
   "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
   "prior_evidence": {
     "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
@@ -486,6 +486,23 @@
     "sparsity_diagnostics_every": 20,
     "logging_storage_note": "Cadence 20 preserves exact full-neuron vectors at every retained capture and aligns with every other step of the cadence-10 parent controls. It bounds the nine-run treatment ladder near 6 GB on the 97 GB local volume; cadence 10 would require about 12 GB before compilation caches.",
     "control_policy": "Reuse the verified same-seed parent fuzzy diagnostic runs only after exact scientific-coordinate and source-provenance comparison.",
+    "control_verification": {
+      "sealed_parent_commit": "aed696d",
+      "forward_source_check": "git diff --exit-code aed696d -- recipes/fuzzy_topk_autoencoder rig/kernels/fuzzy_topk.py is clean; the balanced recipe's neutral-path equivalence is covered by numerical tests.",
+      "coordinate_check": "All nine parent results have status ok and match seed, tier, L, D, H=16D, K=4D, full schedule, batch 16, context 8192, base LR 0.00390625, and choicewise backend. Treatment-only differences are the declared frequency-floor training objective and cadence-20 observer.",
+      "parent_sparsity_diagnostics_every": 10,
+      "parent_run_ids": {
+        "60m-s1337": "20260828T010014.076667Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1337-910ebbcc",
+        "60m-s1338": "20260828T010720.730293Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1338-cdd37f5b",
+        "60m-s1339": "20260828T011428.636932Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1339-7f8b426f",
+        "125m-s1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+        "125m-s1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+        "125m-s1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79",
+        "250m-s1337": "20260828T022449.453967Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1337-9dc93f5a",
+        "250m-s1338": "20260828T034154.231319Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1338-ba68b1be",
+        "250m-s1339": "20260828T045900.979160Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1339-f826e264"
+      }
+    },
     "launch_policy": "After selecting and versioning one mature treatment, launch nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
     "stopping_rule": "Each admitted cell runs its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",
     "treatment": {
@@ -495,7 +512,25 @@
       "alive_coefficient": 0.1,
       "alive_target": 0.1
     },
-    "status": "selected_waiting_250m_feasibility_gate"
+    "feasibility_gate": {
+      "tier": "250m",
+      "seed": 1350,
+      "stop_after_step": 120,
+      "run_id": "20260829T023600.037866Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-feasibility-s13-1fa32318",
+      "reference_run_id": "20260828T005244.940377Z-fuzzy_topk_autoencoder-250m-sparsity-observer-c10-s1350-5783f4dd",
+      "train_compile_seconds": 56.07577574113384,
+      "sparsity_diagnostic_compile_seconds": 14.243115602992475,
+      "train_seconds": 58.155928403837606,
+      "tokens_per_second": 270456.3478168478,
+      "reference_train_seconds": 57.07513278000988,
+      "slowdown_percent_vs_parent_cadence10": 1.8936366350535527,
+      "validation_loss": 6.555294454097748,
+      "dead_fraction": 0.0007174744897959183,
+      "trailing_dead_fraction": 0.00018933354591836737,
+      "positive_group_rate": 0.8856542706489563,
+      "decision": "accepted: compilation, training, validation, and vector diagnostics completed with finite values and no memory failure; the full-schedule qualification threshold is inapplicable to this declared early-stop systems gate"
+    },
+    "status": "admitted_ready_to_launch"
   },
   "optional_extension": {
     "tier": "500m",
@@ -551,6 +586,9 @@
       "frequency-c10-rho01": "20260829T022142.792339Z-fuzzy_topk_balanced-p900-frequency-c10-rho01-s1350-28200601",
       "bias-c01-frequency-c1-rho01": "20260829T022550.712241Z-fuzzy_topk_balanced-p900-bias-c01-frequency-c1-rho01-s1350-e2111dbf"
     },
-    "mature_ladder": {}
+    "mature_ladder": {
+      "250m_feasibility_gate": "20260829T023600.037866Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-feasibility-s13-1fa32318",
+      "250m_parent_cadence10_reference": "20260828T005244.940377Z-fuzzy_topk_autoencoder-250m-sparsity-observer-c10-s1350-5783f4dd"
+    }
   }
 }
