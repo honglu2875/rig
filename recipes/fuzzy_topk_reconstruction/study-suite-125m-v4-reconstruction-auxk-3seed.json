@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-reconstruction-auxk-125m-v4-3seed",
+  "status": "predeclared",
+  "objective": "Compare the existing fuzzy TopK parent with a train-only input-reconstruction decoder and the same decoder plus literal residual AuxK over three paired seeds.",
+  "comparison_policy": "Reuse the already-sealed v4-32 parent runs exactly. Launch only the two missing treatment arms at the same seeds, data order, deployed architecture, token horizon, optimizer, topology, and evaluation. Report rather than equalize the treatments' extra training FLOPs.",
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "tier": "125m",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "seeds": [1337, 1338, 1339],
+    "layers": 11,
+    "d_model": 640,
+    "mlp_width": 10240,
+    "top_k": 2560,
+    "group_size": 4,
+    "schedule_steps": 4656,
+    "training_tokens": 610271232,
+    "sparsity_diagnostics_every": 100,
+    "checkpoint_policy": "none",
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804"
+  },
+  "source": {
+    "parent_study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "parent_manifest": "recipes/fuzzy_topk_autoencoder/ablation-sparsity-diagnostics-ladder-60m-125m-250m-3seed.json",
+    "treatment_implementation_commit": "3a9fbdc91a290c9841db69e006ac25a6bc1575c9",
+    "treatment_branch": "research/fuzzy-topk-reconstruction-auxk"
+  },
+  "arms": [
+    {
+      "id": "parent",
+      "recipe": "fuzzy_topk_autoencoder",
+      "status": "reuse_complete_verified",
+      "reconstruction_coefficient": 0.0,
+      "auxk_coefficient": 0.0,
+      "issued_mlp_matrix_flops": "12 M D H",
+      "run_ids": {
+        "1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+        "1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+        "1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79"
+      },
+      "validation_loss_by_seed": {
+        "1337": 3.591915398836136,
+        "1338": 3.581060439348221,
+        "1339": 3.584172636270523
+      }
+    },
+    {
+      "id": "reconstruction",
+      "recipe": "fuzzy_topk_reconstruction",
+      "status": "six_cell_queue_contains_three_missing_endpoints",
+      "reconstruction_coefficient": 1.0,
+      "auxk_coefficient": 0.0,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880,
+      "issued_mlp_matrix_flops": "18 M D H"
+    },
+    {
+      "id": "reconstruction-auxk",
+      "recipe": "fuzzy_topk_reconstruction_auxk",
+      "status": "six_cell_queue_contains_three_missing_endpoints",
+      "reconstruction_coefficient": 1.0,
+      "auxk_coefficient": 0.03125,
+      "aux_k": 320,
+      "auxk_cohort_count": 8,
+      "dead_tokens_threshold": 10000000,
+      "dead_after_steps": 77,
+      "train_only_parameter_count": 72089600,
+      "optimized_parameter_count": 298842880,
+      "issued_mlp_matrix_flops": "19 M D H"
+    }
+  ],
+  "systems_gate": {
+    "seed": 1350,
+    "stop_after_step": 120,
+    "endpoint_evidence": false,
+    "required": [
+      "finite compilation, training, reconstruction metrics, and validation",
+      "no out-of-memory or device failure",
+      "complete packed training and three full-feature sparsity captures",
+      "reconstruction throughput at least half the sealed v4-32 parent throughput",
+      "AuxK incremental training-time overhead no more than 15 percent versus reconstruction-only"
+    ]
+  },
+  "full_run_metrics": {
+    "primary": [
+      "canonical validation loss",
+      "persistent dead-feature fraction on aligned final sparsity captures"
+    ],
+    "mechanism": [
+      "reconstruction NMSE by layer and step",
+      "AuxK NMSE and positive auxiliary fraction by layer and step",
+      "main-path batch-active and tracked-dead fractions",
+      "dead-group fraction, positive-group rate, and within-group winner entropy"
+    ],
+    "systems": [
+      "tokens per second",
+      "train and compile seconds",
+      "issued FLOPs per token"
+    ]
+  },
+  "launch_policy": "Run one 120-step systems gate for each new arm, validate fail-closed, then run only reconstruction and reconstruction+AuxK at seeds 1337, 1338, and 1339. Never launch a parent cell. Do not retry or select based on intermediate loss or sparsity observations.",
+  "stopping_rule": "Any systems failure stops the sequential queue for inspection. Every admitted endpoint runs through the complete 4656-step cosine schedule.",
+  "evidence_boundary": "This is a paired three-seed mechanism study at 125M on one v4-32 topology. It can establish seed-robust behavior at this tier but does not by itself establish transfer across model scale."
+}

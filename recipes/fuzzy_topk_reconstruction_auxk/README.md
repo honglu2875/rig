@@ -11,9 +11,11 @@ model. Neither reconstruction output enters the transformer residual stream,
 and the separate decoder is removed from evaluation and saved deployment
 checkpoints.
 
-The paired parent/reconstruction/reconstruction+AuxK mechanism screen is
-predeclared in the sibling recipe's
-[`study-suite-125m-v6e-reconstruction-auxk.json`](../fuzzy_topk_reconstruction/study-suite-125m-v6e-reconstruction-auxk.json).
+The paired parent/reconstruction/reconstruction+AuxK studies are predeclared
+in the sibling recipe's one-seed
+[`study-suite-125m-v6e-reconstruction-auxk.json`](../fuzzy_topk_reconstruction/study-suite-125m-v6e-reconstruction-auxk.json)
+and three-seed v4-32
+[`study-suite-125m-v4-reconstruction-auxk-3seed.json`](../fuzzy_topk_reconstruction/study-suite-125m-v4-reconstruction-auxk-3seed.json).
 
 ## Main path and reconstruction objective
 

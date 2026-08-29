@@ -12,10 +12,14 @@ recipe adds literal residual-reconstruction AuxK to this exact treatment. The
 folders are deliberately separate study arms even though their entry scripts
 share an implementation.
 
-The first paired three-arm mechanism screen is predeclared in
+The original one-seed v6e mechanism screen is predeclared in
 [`study-suite-125m-v6e-reconstruction-auxk.json`](study-suite-125m-v6e-reconstruction-auxk.json).
-It keeps the parent, reconstruction, and reconstruction+AuxK token schedules
-identical and reports the treatments' additional training work explicitly.
+After that preemptible instance disappeared before either treatment gate, the
+replacement
+[`study-suite-125m-v4-reconstruction-auxk-3seed.json`](study-suite-125m-v4-reconstruction-auxk-3seed.json)
+reuses the three already-sealed v4-32 parent runs and launches only the six
+missing treatment endpoints. Both suites report additional training work
+explicitly rather than shortening the treatments.
 
 ## Deployed forward pass
 
