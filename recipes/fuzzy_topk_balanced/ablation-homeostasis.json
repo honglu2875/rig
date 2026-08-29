@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-homeostasis",
+  "status": "implementation_validated_cpu_tpu_gates_pending",
+  "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
+  "prior_evidence": {
+    "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "finding": "Late zero activation is mostly whole-group ReLU death, with an additional within-group winner-concentration effect.",
+    "mean_final_trailing_dead_fraction": {
+      "60m": 0.34330610275151513,
+      "125m": 0.35761422983939395,
+      "250m": 0.3386662356904762,
+      "500m": 0.36337381979166666
+    }
+  },
+  "hypotheses": {
+    "choice_balance": "A population-level balance loss across the four choices in every fixed group prevents persistent winner monopolies without preventing token specialization.",
+    "group_survival": "A squared hinge on negative group maxima directly prevents the larger failure mode in which all four features fall below ReLU.",
+    "combination": "Choice balance and group survival address separable mechanisms and may compose better than either alone.",
+    "quality": "A treatment can retain the parent fuzzy validation advantage while materially reducing late dead-feature fractions."
+  },
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "recipe": "fuzzy_topk_balanced",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "mlp": "H=16D, K=4D, fixed group size G=4",
+    "sparse_mlp_backend": "choicewise",
+    "evaluation_forward": "ordinary parent fuzzy Top-K with no auxiliary computation"
+  },
+  "objectives": {
+    "switch": "G * mean_group sum_choice(stop_gradient(hard_load) * mean_soft_probability)",
+    "importance": "mean_group(G * sum_choice(mean_soft_probability^2) - 1)",
+    "alive": "mean_token_group(relu(margin - max_choice(score))^2)",
+    "normalization": "Choice statistics and alive loss are reduced over the complete global data-parallel batch; the selected layer losses are averaged across transformer blocks before applying coefficients."
+  },
+  "throughput_gate": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 120,
+    "controls": [
+      "neutral parent path",
+      "switch coefficient 0.01 plus alive coefficient 1.0 at margin 0"
+    ],
+    "acceptance": "Both runs complete standard validation and feature captures; balanced training time is no more than 25% slower than neutral, with approximately 20% the desired systems target.",
+    "status": "pending"
+  },
+  "prototype_screen": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 900,
+    "schedule_horizon": 2316,
+    "sparsity_diagnostics_every": 50,
+    "selection_window": "last three captures through step 900",
+    "declared_cells": [
+      {
+        "id": "neutral",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "switch-c001",
+        "mode": "switch",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "importance-c001",
+        "mode": "importance",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c01-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 0.1,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c1-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c10-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 10.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c1-m01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.1
+      },
+      {
+        "id": "switch-c001-alive-c1-m0",
+        "mode": "switch",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "importance-c001-alive-c1-m0",
+        "mode": "importance",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0
+      }
+    ],
+    "advance_rule": "Prefer the lowest-complexity declared cell that materially lowers both dead-feature fraction and negative-group incidence versus neutral, preserves within-group winner entropy, and has no catastrophic cross-entropy or gradient-norm regression. Ties are resolved before inspecting other seeds.",
+    "status": "pending"
+  },
+  "tiers": {
+    "60m": {
+      "layers": 11,
+      "d_model": 384,
+      "dictionary_width": 6144,
+      "retained_width": 1536,
+      "stored_parameters": 97123584,
+      "schedule_steps": 2316
+    },
+    "125m": {
+      "layers": 11,
+      "d_model": 640,
+      "dictionary_width": 10240,
+      "retained_width": 2560,
+      "stored_parameters": 226753280,
+      "schedule_steps": 4656
+    },
+    "250m": {
+      "layers": 14,
+      "d_model": 896,
+      "dictionary_width": 14336,
+      "retained_width": 3584,
+      "stored_parameters": 495053440,
+      "schedule_steps": 9402
+    },
+    "500m": {
+      "layers": 16,
+      "d_model": 1280,
+      "dictionary_width": 20480,
+      "retained_width": 5120,
+      "stored_parameters": 1072968960,
+      "schedule_steps": 19561
+    }
+  },
+  "mature_ladder": {
+    "tiers": [
+      "60m",
+      "125m",
+      "250m"
+    ],
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "sparsity_diagnostics_every": 10,
+    "control_policy": "Reuse the verified same-seed parent fuzzy diagnostic runs only after exact scientific-coordinate and source-provenance comparison.",
+    "launch_policy": "After selecting and versioning one mature treatment, launch nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
+    "stopping_rule": "Each admitted cell runs its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",
+    "status": "blocked_on_prototype_screen"
+  },
+  "optional_extension": {
+    "tier": "500m",
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "policy": "Queue only after the mature smaller ladder if the accelerator window permits; otherwise retain as a separately declared continuation.",
+    "status": "not_admitted"
+  },
+  "references": [
+    {
+      "title": "Switch Transformers",
+      "url": "https://www.jmlr.org/papers/v23/21-0998.html",
+      "use": "hard-load times mean-router-probability balance objective"
+    },
+    {
+      "title": "Scaling and evaluating sparse autoencoders",
+      "url": "https://arxiv.org/abs/2406.04093",
+      "use": "precedent for training-only auxiliary signals that target dead latent populations; its reconstruction-residual AuxK is not transplanted into this language-model MLP"
+    }
+  ],
+  "run_ids": {
+    "throughput_gate": {},
+    "prototype_screen": {},
+    "mature_ladder": {}
+  }
+}

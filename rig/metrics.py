@@ -122,6 +122,11 @@ _AXES_AND_SCALARS = (
     Metric(19, "fuzzy.activation_frequency"),
     Metric(20, "fuzzy.activation_mean"),
     Metric(21, "fuzzy.activation_rms"),
+    # Training-only fuzzy TopK homeostasis objectives. Model-wide and per-block
+    # values share these ids; the logpack scope distinguishes them.
+    Metric(22, "fuzzy.load_balance_loss"),
+    Metric(23, "fuzzy.importance_balance_loss"),
+    Metric(24, "fuzzy.alive_margin_loss"),
 )
 
 _DIAGNOSTIC_FAMILY_BASES = (("param", 100), ("grad", 200), ("update", 300))
