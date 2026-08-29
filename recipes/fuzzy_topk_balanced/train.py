@@ -247,7 +247,9 @@ class Config:
     balance_coefficient: float
     balance_temperature: float
     alive_coefficient: float
+    alive_mode: str
     alive_margin: float
+    alive_target: float
     loss_backend: str
     vocab_tile_size: int
     dtype_name: str
@@ -511,13 +513,17 @@ class BalanceSettings:
     coefficient: NonnegativeFloat
     temperature: PositiveFloat
     alive_coefficient: NonnegativeFloat
+    alive_mode: Literal["token_margin", "frequency_floor"]
     alive_margin: NonnegativeFloat
+    alive_target: PositiveFloat
 
     def validate(self, label: str) -> None:
         if self.mode == "none" and self.coefficient != 0.0:
             raise ValueError(f"{label}.coefficient must be zero when mode is none")
         if self.mode != "none" and self.coefficient == 0.0:
             raise ValueError(f"{label}.coefficient must be positive when balance is on")
+        if self.alive_target > 1.0:
+            raise ValueError(f"{label}.alive_target must be at most one")
 
 
 @dataclass(frozen=True, slots=True)
@@ -777,13 +783,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--fuzzy-alive-coefficient",
         type=nonnegative_float,
         default=None,
-        help="coefficient on the negative group-maximum margin penalty",
+        help="coefficient on the selected latent-survival objective",
+    )
+    sparse.add_argument(
+        "--fuzzy-alive-mode",
+        choices=("token_margin", "frequency_floor"),
+        default=None,
+        help="per-token maximum margin or global-batch activation-frequency floor",
     )
     sparse.add_argument(
         "--fuzzy-alive-margin",
         type=nonnegative_float,
         default=None,
         help="minimum pre-ReLU group maximum encouraged by the alive objective",
+    )
+    sparse.add_argument(
+        "--fuzzy-alive-target",
+        type=positive_float,
+        default=None,
+        help="target aggregate positive-routing frequency per group for the floor",
     )
     sparse.add_argument(
         "--sparse-training-steps",
@@ -1003,11 +1021,19 @@ def resolve_config(
         if args.fuzzy_alive_coefficient is None
         else args.fuzzy_alive_coefficient
     )
+    alive_mode = args.fuzzy_alive_mode or balance.alive_mode
     alive_margin = (
         balance.alive_margin
         if args.fuzzy_alive_margin is None
         else args.fuzzy_alive_margin
     )
+    alive_target = (
+        balance.alive_target
+        if args.fuzzy_alive_target is None
+        else args.fuzzy_alive_target
+    )
+    if alive_target > 1.0:
+        raise ValueError("--fuzzy-alive-target must be at most one")
     if balance_mode == "none" and balance_coefficient != 0.0:
         raise ValueError(
             "--fuzzy-balance-coefficient must be zero when balance mode is none"
@@ -1106,7 +1132,9 @@ def resolve_config(
         balance_coefficient=balance_coefficient,
         balance_temperature=balance_temperature,
         alive_coefficient=alive_coefficient,
+        alive_mode=alive_mode,
         alive_margin=alive_margin,
+        alive_target=alive_target,
         loss_backend=kernels.loss_backend,
         vocab_tile_size=kernels.vocab_tile_size,
         dtype_name=dtype_name,
@@ -1187,11 +1215,16 @@ def model_console_rows(
         if config.balance_coefficient
         else "off"
     )
-    alive_description = (
-        f"margin {config.alive_margin:g} × {config.alive_coefficient:g}"
-        if config.alive_coefficient
-        else "off"
-    )
+    if config.alive_coefficient and config.alive_mode == "frequency_floor":
+        alive_description = (
+            f"frequency floor {config.alive_target:g} × {config.alive_coefficient:g}"
+        )
+    elif config.alive_coefficient:
+        alive_description = (
+            f"margin {config.alive_margin:g} × {config.alive_coefficient:g}"
+        )
+    else:
+        alive_description = "off"
     return (
         (
             "model",
@@ -1251,7 +1284,9 @@ def experiment_config_metadata(config: Config) -> dict[str, Any]:
                 "coefficient": config.balance_coefficient,
                 "temperature": config.balance_temperature,
                 "alive_coefficient": config.alive_coefficient,
+                "alive_mode": config.alive_mode,
                 "alive_margin": config.alive_margin,
+                "alive_target": config.alive_target,
             },
             "parameterization": {
                 "name": config.parameterization,
@@ -1360,7 +1395,9 @@ def checkpoint_metadata(
                 "coefficient": config.balance_coefficient,
                 "temperature": config.balance_temperature,
                 "alive_coefficient": config.alive_coefficient,
+                "alive_mode": config.alive_mode,
                 "alive_margin": config.alive_margin,
+                "alive_target": config.alive_target,
             },
         },
     }
@@ -1378,7 +1415,9 @@ def implementation_metadata(
         "fuzzy_balance_coefficient": config.balance_coefficient,
         "fuzzy_balance_temperature": config.balance_temperature,
         "fuzzy_alive_coefficient": config.alive_coefficient,
+        "fuzzy_alive_mode": config.alive_mode,
         "fuzzy_alive_margin": config.alive_margin,
+        "fuzzy_alive_target": config.alive_target,
         "attention_tuning": attention_runtime_metadata(runtime),
         "loss_backend": config.loss_backend,
         "vocab_tile_size": config.vocab_tile_size,
@@ -2057,9 +2096,12 @@ def balanced_fuzzy_topk_mlp_flop_rule(site: Site) -> int:
 
 
 def low_overhead_fuzzy_topk_mlp_flop_rule(site: Site) -> int:
-    """Bill the parent contractions while retaining one alive deficit per group."""
+    """Bill parent contractions for hard-load and either survival objective."""
 
-    if len(site.in_shapes) not in (5, 10):
+    # The token-margin reverse retains its per-group deficit (10 operands).
+    # Frequency-floor routing uses only a direct bias surrogate, so DCE removes
+    # that residual and leaves nine.  Neither adds a matrix contraction.
+    if len(site.in_shapes) not in (5, 9, 10):
         raise FlopError(
             f"unexpected low-overhead fuzzy boundary shapes: {site.in_shapes}"
         )
@@ -2115,7 +2157,9 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
         top_k=config.mlp_top_k,
         mode=config.balance_mode,
         temperature=config.balance_temperature,
+        alive_mode=config.alive_mode,
         alive_margin=config.alive_margin,
+        alive_target=config.alive_target,
     )
 
     def loss(trainable: Mapping[str, Any]) -> jax.Array:
@@ -2358,7 +2402,9 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                 top_k=config.mlp_top_k,
                 mode=config.balance_mode,
                 temperature=config.balance_temperature,
+                alive_mode=config.alive_mode,
                 alive_margin=config.alive_margin,
+                alive_target=config.alive_target,
             ),
             mesh=mesh,
         )
@@ -2854,7 +2900,9 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             "coefficient": config.balance_coefficient,
             "temperature": config.balance_temperature,
             "alive_coefficient": config.alive_coefficient,
+            "alive_mode": config.alive_mode,
             "alive_margin": config.alive_margin,
+            "alive_target": config.alive_target,
             "model": {
                 name: float(balance_values[index])
                 for index, name in enumerate(FUZZY_BALANCE_STAT_NAMES)

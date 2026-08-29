@@ -11,8 +11,10 @@ returns three training-only objectives:
     The squared concentration of the mean soft choice probability.  This is a
     smooth population-balance objective without a hard-routing factor.
 ``alive``
-    A squared zero-margin penalty on negative group maxima.  It addresses the
-    separate failure mode where an entire group falls below the ReLU boundary.
+    Either a squared per-token margin on negative group maxima or a global-
+    batch activation-frequency floor.  Both address the separate failure mode
+    where an entire group falls below the ReLU boundary.  The frequency floor
+    uses a straight-through bias surrogate so it does not recompute scores.
 
 The choicewise custom VJP shares the ordinary feature-scoring forward pass and
 recomputes scores once in its reverse rule.  Auxiliary preactivation
@@ -54,7 +56,9 @@ class FuzzyTopKBalanceConfig:
     top_k: int
     mode: Literal["none", "switch", "importance", "bias"] = "switch"
     temperature: float = 1.0
+    alive_mode: Literal["token_margin", "frequency_floor"] = "token_margin"
     alive_margin: float = 0.0
+    alive_target: float = 0.1
 
     def __post_init__(self) -> None:
         if self.top_k <= 0:
@@ -65,6 +69,10 @@ class FuzzyTopKBalanceConfig:
             raise ValueError("temperature must be finite and positive")
         if not math.isfinite(self.alive_margin):
             raise ValueError("alive_margin must be finite")
+        if self.alive_mode not in ("token_margin", "frequency_floor"):
+            raise ValueError(f"unknown fuzzy alive mode: {self.alive_mode!r}")
+        if not math.isfinite(self.alive_target) or not 0.0 < self.alive_target <= 1.0:
+            raise ValueError("alive_target must be finite and in (0, 1]")
 
     @property
     def compute_soft_statistics(self) -> bool:
@@ -73,6 +81,10 @@ class FuzzyTopKBalanceConfig:
     @property
     def compute_load_statistics(self) -> bool:
         return self.mode in ("switch", "bias")
+
+    @property
+    def compute_activation_statistics(self) -> bool:
+        return self.alive_mode == "frequency_floor"
 
 
 def _validate_inputs(
@@ -170,20 +182,35 @@ def _raw_balance_sums(
     alive_margin: float,
     compute_soft_statistics: bool,
     compute_load_statistics: bool,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    compute_activation_statistics: bool,
+    token_margin_alive: bool,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     choices = hidden.shape[-1] // top_k
     reduction_axes = tuple(range(winners.ndim - 1))
-    if compute_load_statistics:
+    if compute_load_statistics or compute_activation_statistics:
         load_sums = jnp.zeros((top_k, choices), jnp.float32)
+        active_sums = jnp.zeros((top_k, choices), jnp.float32)
 
-        def visit_choice(choice, loads):
-            return loads.at[:, choice].set(
-                jnp.sum((winners == choice).astype(jnp.float32), axis=reduction_axes)
-            )
+        def visit_choice(choice, statistics):
+            loads, activations = statistics
+            winner_mask = winners == choice
+            if compute_load_statistics:
+                loads = loads.at[:, choice].set(
+                    jnp.sum(winner_mask.astype(jnp.float32), axis=reduction_axes)
+                )
+            if compute_activation_statistics:
+                active = winner_mask & (maxima > 0.0)
+                activations = activations.at[:, choice].set(
+                    jnp.sum(active.astype(jnp.float32), axis=reduction_axes)
+                )
+            return loads, activations
 
-        load_sums = lax.fori_loop(0, choices, visit_choice, load_sums)
+        load_sums, active_sums = lax.fori_loop(
+            0, choices, visit_choice, (load_sums, active_sums)
+        )
     else:
         load_sums = jnp.zeros((top_k, choices), jnp.float32)
+        active_sums = jnp.zeros((top_k, choices), jnp.float32)
     if compute_soft_statistics:
         grouped = hidden.reshape((*hidden.shape[:-1], top_k, choices))
         probabilities = jax.nn.softmax(
@@ -192,9 +219,19 @@ def _raw_balance_sums(
         soft_sums = jnp.sum(probabilities, axis=reduction_axes)
     else:
         soft_sums = jnp.zeros((top_k, choices), jnp.float32)
-    deficit = jax.nn.relu(jnp.float32(alive_margin) - maxima.astype(jnp.float32))
-    alive_sum = jnp.sum(jnp.square(deficit), dtype=jnp.float32)
-    return soft_sums, lax.stop_gradient(load_sums), alive_sum, deficit
+    if token_margin_alive:
+        deficit = jax.nn.relu(jnp.float32(alive_margin) - maxima.astype(jnp.float32))
+        alive_sum = jnp.sum(jnp.square(deficit), dtype=jnp.float32)
+    else:
+        deficit = jnp.zeros_like(maxima, dtype=jnp.float32)
+        alive_sum = jnp.asarray(0.0, jnp.float32)
+    return (
+        soft_sums,
+        lax.stop_gradient(load_sums),
+        lax.stop_gradient(active_sums),
+        alive_sum,
+        deficit,
+    )
 
 
 def _choicewise_forward(
@@ -213,6 +250,7 @@ def _choicewise_forward(
     jax.Array,
     jax.Array,
     jax.Array,
+    jax.Array,
 ]:
     hidden = _preactivations(x, up_weight, up_bias)
     values, winners, maxima = _selection_from_hidden(hidden, top_k=config.top_k)
@@ -224,7 +262,7 @@ def _choicewise_forward(
         down_bias,
         model_width=x.shape[-1],
     )
-    soft_sums, load_sums, alive_sum, deficit = _raw_balance_sums(
+    soft_sums, load_sums, active_sums, alive_sum, deficit = _raw_balance_sums(
         hidden,
         winners,
         maxima,
@@ -233,8 +271,19 @@ def _choicewise_forward(
         alive_margin=config.alive_margin,
         compute_soft_statistics=config.compute_soft_statistics,
         compute_load_statistics=config.compute_load_statistics,
+        compute_activation_statistics=config.compute_activation_statistics,
+        token_margin_alive=config.alive_mode == "token_margin",
     )
-    return output, values, winners, soft_sums, load_sums, alive_sum, deficit
+    return (
+        output,
+        values,
+        winners,
+        soft_sums,
+        load_sums,
+        active_sums,
+        alive_sum,
+        deficit,
+    )
 
 
 def _choicewise_backward(
@@ -253,7 +302,13 @@ def _choicewise_backward(
         winners,
         alive_deficit,
     ) = residuals
-    output_cotangent, soft_cotangent, _load_cotangent, alive_cotangent = cotangents
+    (
+        output_cotangent,
+        soft_cotangent,
+        _load_cotangent,
+        _active_cotangent,
+        alive_cotangent,
+    ) = cotangents
     model_width, hidden_width = up_weight.shape
     top_k = config.top_k
     choices = hidden_width // top_k
@@ -364,17 +419,24 @@ def _choicewise_backward(
 def _make_choicewise_operation(config: FuzzyTopKBalanceConfig):
     @jax.custom_vjp
     def operation(x, up_weight, up_bias, down_weight, down_bias):
-        output, _values, _winners, soft_sums, load_sums, alive_sum, _deficit = (
-            _choicewise_forward(
-                x,
-                up_weight,
-                up_bias,
-                down_weight,
-                down_bias,
-                config=config,
-            )
+        (
+            output,
+            _values,
+            _winners,
+            soft_sums,
+            load_sums,
+            active_sums,
+            alive_sum,
+            _deficit,
+        ) = _choicewise_forward(
+            x,
+            up_weight,
+            up_bias,
+            down_weight,
+            down_bias,
+            config=config,
         )
-        return output, soft_sums, load_sums, alive_sum
+        return output, soft_sums, load_sums, active_sums, alive_sum
 
     def forward_rule(x, up_weight, up_bias, down_weight, down_bias):
         (
@@ -383,6 +445,7 @@ def _make_choicewise_operation(config: FuzzyTopKBalanceConfig):
             winners,
             soft_sums,
             load_sums,
+            active_sums,
             alive_sum,
             alive_deficit,
         ) = _choicewise_forward(
@@ -398,7 +461,7 @@ def _make_choicewise_operation(config: FuzzyTopKBalanceConfig):
             winners,
             alive_deficit,
         )
-        return (output, soft_sums, load_sums, alive_sum), residuals
+        return (output, soft_sums, load_sums, active_sums, alive_sum), residuals
 
     def backward_rule(residuals, cotangents):
         return _choicewise_backward(residuals, cotangents, config=config)
@@ -416,7 +479,7 @@ def _balanced_choicewise_fuzzy_topk_mlp(
     down_bias: jax.Array,
     *,
     config: FuzzyTopKBalanceConfig,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Named boundary for profiling and physical matrix-FLOP accounting."""
 
     return _make_choicewise_operation(config)(
@@ -433,7 +496,7 @@ def _low_overhead_choicewise_fuzzy_topk_mlp(
     down_bias: jax.Array,
     *,
     config: FuzzyTopKBalanceConfig,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Named no-softmax boundary for survival and hard-load bias balance."""
 
     return _make_choicewise_operation(config)(
@@ -444,6 +507,7 @@ def _low_overhead_choicewise_fuzzy_topk_mlp(
 def _normalize_sums(
     soft_sums: jax.Array,
     load_sums: jax.Array,
+    active_sums: jax.Array,
     alive_sum: jax.Array,
     tokens: jax.Array,
     up_bias: jax.Array,
@@ -468,12 +532,27 @@ def _normalize_sums(
         load = lax.stop_gradient(load_sums / tokens.astype(jnp.float32))
         centered_load = load - jnp.float32(1.0) / choices
         grouped_bias = up_bias.astype(jnp.float32).reshape(load.shape)
-        switch_loss = choices * jnp.mean(jnp.sum(centered_load * grouped_bias, axis=-1))
+        report = choices * jnp.mean(jnp.sum(jnp.square(centered_load), axis=-1))
+        surrogate = choices * jnp.mean(jnp.sum(centered_load * grouped_bias, axis=-1))
+        switch_loss = lax.stop_gradient(report - surrogate) + surrogate
         importance_loss = jnp.asarray(0.0, jnp.float32)
     else:
         switch_loss = jnp.asarray(0.0, jnp.float32)
         importance_loss = jnp.asarray(0.0, jnp.float32)
-    alive_loss = alive_sum / (tokens.astype(jnp.float32) * config.top_k)
+    if config.alive_mode == "frequency_floor":
+        activation_frequency = lax.stop_gradient(
+            active_sums / tokens.astype(jnp.float32)
+        )
+        target = jnp.float32(config.alive_target) / choices
+        deficit = jax.nn.relu(target - activation_frequency)
+        grouped_bias = up_bias.astype(jnp.float32).reshape(active_sums.shape)
+        report = choices * jnp.mean(jnp.sum(jnp.square(deficit), axis=-1))
+        surrogate = choices * jnp.mean(
+            jnp.sum(-jnp.float32(2.0) * deficit * grouped_bias, axis=-1)
+        )
+        alive_loss = lax.stop_gradient(report - surrogate) + surrogate
+    else:
+        alive_loss = alive_sum / (tokens.astype(jnp.float32) * config.top_k)
     return jnp.stack((switch_loss, importance_loss, alive_loss)).astype(jnp.float32)
 
 
@@ -494,7 +573,7 @@ def fuzzy_topk_mlp_with_balance(
         if config.compute_soft_statistics
         else _low_overhead_choicewise_fuzzy_topk_mlp
     )
-    output, soft_sums, load_sums, alive_sum = operation(
+    output, soft_sums, load_sums, active_sums, alive_sum = operation(
         x,
         up_weight,
         up_bias,
@@ -504,7 +583,13 @@ def fuzzy_topk_mlp_with_balance(
     )
     tokens = jnp.asarray(math.prod(x.shape[:-1]), jnp.float32)
     return output, _normalize_sums(
-        soft_sums, load_sums, alive_sum, tokens, up_bias, config=config
+        soft_sums,
+        load_sums,
+        active_sums,
+        alive_sum,
+        tokens,
+        up_bias,
+        config=config,
     )
 
 
@@ -520,7 +605,7 @@ def make_mesh_fuzzy_topk_mlp_with_balance(
             if config.compute_soft_statistics
             else _low_overhead_choicewise_fuzzy_topk_mlp
         )
-        output, soft_sums, load_sums, alive_sum = operation(
+        output, soft_sums, load_sums, active_sums, alive_sum = operation(
             x,
             up_weight,
             up_bias,
@@ -530,6 +615,7 @@ def make_mesh_fuzzy_topk_mlp_with_balance(
         )
         global_soft_sums = lax.psum(soft_sums, "data")
         global_load_sums = lax.psum(load_sums, "data")
+        global_active_sums = lax.psum(active_sums, "data")
         global_alive_sum = lax.psum(alive_sum, "data")
         global_tokens = lax.psum(
             jnp.asarray(math.prod(x.shape[:-1]), jnp.float32), "data"
@@ -537,6 +623,7 @@ def make_mesh_fuzzy_topk_mlp_with_balance(
         statistics = _normalize_sums(
             global_soft_sums,
             global_load_sums,
+            global_active_sums,
             global_alive_sum,
             global_tokens,
             up_bias,
@@ -583,7 +670,7 @@ def naive_fuzzy_topk_mlp_with_balance(
     grouped = hidden.reshape((*hidden.shape[:-1], config.top_k, choices))
     winners = jnp.argmax(grouped, axis=-1)
     maxima = jnp.max(grouped, axis=-1)
-    soft_sums, load_sums, alive_sum, _deficit = _raw_balance_sums(
+    soft_sums, load_sums, active_sums, alive_sum, _deficit = _raw_balance_sums(
         hidden,
         winners,
         maxima,
@@ -592,10 +679,18 @@ def naive_fuzzy_topk_mlp_with_balance(
         alive_margin=config.alive_margin,
         compute_soft_statistics=config.compute_soft_statistics,
         compute_load_statistics=config.compute_load_statistics,
+        compute_activation_statistics=config.compute_activation_statistics,
+        token_margin_alive=config.alive_mode == "token_margin",
     )
     tokens = jnp.asarray(math.prod(x.shape[:-1]), jnp.float32)
     return output, _normalize_sums(
-        soft_sums, load_sums, alive_sum, tokens, up_bias, config=config
+        soft_sums,
+        load_sums,
+        active_sums,
+        alive_sum,
+        tokens,
+        up_bias,
+        config=config,
     )
 
 

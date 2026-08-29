@@ -16,6 +16,7 @@
   "hypotheses": {
     "choice_balance": "A population-level balance loss across the four choices in every fixed group prevents persistent winner monopolies without preventing token specialization.",
     "group_survival": "A squared hinge on negative group maxima directly prevents the larger failure mode in which all four features fall below ReLU.",
+    "frequency_floor": "A global-batch floor on each feature's positive routing frequency can prevent death while remaining dormant above a declared aggregate group-activity target, avoiding the density pressure of a per-token hinge.",
     "combination": "Choice balance and group survival address separable mechanisms and may compose better than either alone.",
     "quality": "A treatment can retain the parent fuzzy validation advantage while materially reducing late dead-feature fractions."
   },
@@ -40,7 +41,9 @@
   "objectives": {
     "switch": "G * mean_group sum_choice(stop_gradient(hard_load) * mean_soft_probability)",
     "importance": "mean_group(G * sum_choice(mean_soft_probability^2) - 1)",
-    "alive": "mean_token_group(relu(margin - max_choice(score))^2)",
+    "hard_bias_report": "G * mean_group sum_choice((stop_gradient(hard_load) - 1/G)^2), with straight-through bias gradient G * (hard_load - 1/G)",
+    "token_margin_alive": "mean_token_group(relu(margin - max_choice(score))^2)",
+    "frequency_floor_alive": "G * mean_group sum_choice(relu(alive_target/G - stop_gradient(positive_route_frequency))^2), with its straight-through gradient applied only to the existing UP bias",
     "normalization": "Choice statistics and alive loss are reduced over the complete global data-parallel batch; the selected layer losses are averaged across transformer blocks before applying coefficients."
   },
   "throughput_gate": {
@@ -109,6 +112,7 @@
     "stop_after_step": 900,
     "schedule_horizon": 2316,
     "sparsity_diagnostics_every": 50,
+    "alive_mode": "token_margin",
     "selection_window": "last three captures through step 900",
     "declared_cells": [
       {
@@ -223,6 +227,68 @@
     "advance_rule": "Prefer the lowest-complexity declared cell that materially lowers both dead-feature fraction and negative-group incidence versus neutral, preserves within-group winner entropy, and has no catastrophic cross-entropy or gradient-norm regression. Ties are resolved before inspecting other seeds.",
     "status": "ready_to_launch_low_overhead_cells"
   },
+  "frequency_floor_screen": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 900,
+    "schedule_horizon": 2316,
+    "sparsity_diagnostics_every": 50,
+    "timing_gate_stop_after_step": 120,
+    "selection_window": "last three captures through step 900",
+    "declared_cells": [
+      {
+        "id": "frequency-c01-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 0.1,
+        "alive_target": 0.1
+      },
+      {
+        "id": "frequency-c1-rho005",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.05
+      },
+      {
+        "id": "frequency-c1-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.1
+      },
+      {
+        "id": "frequency-c1-rho02",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.2
+      },
+      {
+        "id": "frequency-c10-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 10.0,
+        "alive_target": 0.1
+      },
+      {
+        "id": "bias-c01-frequency-c1-rho01",
+        "mode": "bias",
+        "balance_coefficient": 0.1,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.1,
+        "admission": "run only after the standalone floor grid; hard-bias 0.1 is the strongest declared choice-balancing prototype"
+      }
+    ],
+    "advance_rule": "Prefer a target near the parent aggregate positive-group rate that materially lowers persistent dead-feature fraction without making positive-group activity substantially denser or degrading validation. Coefficient ties favor the weaker intervention. Add hard-bias only if its separate winner-entropy gain composes without a quality regression.",
+    "status": "cpu_validated_waiting_for_tpu_gate"
+  },
   "tiers": {
     "60m": {
       "layers": 11,
@@ -268,7 +334,8 @@
       1338,
       1339
     ],
-    "sparsity_diagnostics_every": 10,
+    "sparsity_diagnostics_every": 20,
+    "logging_storage_note": "Cadence 20 preserves exact full-neuron vectors at every retained capture and aligns with every other step of the cadence-10 parent controls. It bounds the nine-run treatment ladder near 6 GB on the 97 GB local volume; cadence 10 would require about 12 GB before compilation caches.",
     "control_policy": "Reuse the verified same-seed parent fuzzy diagnostic runs only after exact scientific-coordinate and source-provenance comparison.",
     "launch_policy": "After selecting and versioning one mature treatment, launch nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
     "stopping_rule": "Each admitted cell runs its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",

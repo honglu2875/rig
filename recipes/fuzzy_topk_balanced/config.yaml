@@ -117,7 +117,9 @@ run:
     coefficient: 0.0
     temperature: 1.0
     alive_coefficient: 0.0
+    alive_mode: token_margin
     alive_margin: 0.0
+    alive_target: 0.1
   evaluation:
     final_predictions: 10485760
     probe:

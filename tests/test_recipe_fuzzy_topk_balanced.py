@@ -75,6 +75,8 @@ class FuzzyTopKBalancedRecipeTests(unittest.TestCase):
         self.assertEqual(config.balance_mode, "none")
         self.assertEqual(config.balance_coefficient, 0.0)
         self.assertEqual(config.alive_coefficient, 0.0)
+        self.assertEqual(config.alive_mode, "token_margin")
+        self.assertEqual(config.alive_target, 0.1)
         self.assertFalse(config.balance_enabled)
         self.assertEqual(config.mlp_mult, 16)
         self.assertEqual(config.sparse_mlp_backend, "choicewise")
@@ -93,8 +95,12 @@ class FuzzyTopKBalancedRecipeTests(unittest.TestCase):
             "0.7",
             "--fuzzy-alive-coefficient",
             "0.02",
+            "--fuzzy-alive-mode",
+            "frequency_floor",
             "--fuzzy-alive-margin",
             "0.1",
+            "--fuzzy-alive-target",
+            "0.2",
         )
         self.assertTrue(config.balance_enabled)
         self.assertTrue(config.soft_balance_enabled)
@@ -102,7 +108,9 @@ class FuzzyTopKBalancedRecipeTests(unittest.TestCase):
         self.assertEqual(config.balance_coefficient, 0.01)
         self.assertEqual(config.balance_temperature, 0.7)
         self.assertEqual(config.alive_coefficient, 0.02)
+        self.assertEqual(config.alive_mode, "frequency_floor")
         self.assertEqual(config.alive_margin, 0.1)
+        self.assertEqual(config.alive_target, 0.2)
 
         with self.assertRaisesRegex(ValueError, "choicewise"):
             resolved(
@@ -226,6 +234,10 @@ class FuzzyTopKBalancedRecipeTests(unittest.TestCase):
             "0.1",
             "--fuzzy-alive-coefficient",
             "1.0",
+            "--fuzzy-alive-mode",
+            "frequency_floor",
+            "--fuzzy-alive-target",
+            "0.1",
         )
         low_overhead_breakdown = trainer.traced_flops(
             low_overhead, trainer.init_params(low_overhead, 3)
