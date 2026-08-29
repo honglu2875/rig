@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-reconstruction-auxk-125m-v6e",
+  "status": "predeclared",
+  "objective": "Test whether a train-only input-reconstruction decoder, with or without literal residual AuxK, reduces late fuzzy-feature death without materially degrading language-model validation loss.",
+  "comparison_policy": "All arms use identical deployed architecture, initialization seed, data stream, token schedule, optimizer, topology, and evaluation. Training-only matrix work is reported rather than equalized because shortening a treatment would confound the auxiliary-objective intervention.",
+  "common": {
+    "accelerator": "TPU v6 lite",
+    "cluster": "v6e-8-preemptible",
+    "tpu_vm_count": 1,
+    "chips_per_host": 8,
+    "profile": "dev",
+    "tier": "125m",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "seed": 1350,
+    "layers": 11,
+    "d_model": 640,
+    "mlp_width": 10240,
+    "top_k": 2560,
+    "group_size": 4,
+    "schedule_steps": 4656,
+    "training_tokens": 610271232,
+    "sparsity_diagnostics_every": 100,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804"
+  },
+  "source": {
+    "parent_commit": "913c43aa28023f1c0e9aa5d7423096cc2fdb8247",
+    "treatment_implementation_commit": "e85288de2c4d604e7a43a42db056f94a0c10d89b",
+    "treatment_branch": "research/fuzzy-topk-reconstruction-auxk"
+  },
+  "arms": [
+    {
+      "id": "parent",
+      "recipe": "fuzzy_topk_autoencoder",
+      "reconstruction_coefficient": 0.0,
+      "auxk_coefficient": 0.0,
+      "issued_mlp_matrix_flops": "12 M D H",
+      "existing_run_id": "20260829T115442.045752Z-fuzzy_topk_autoencoder-125m-v6e-parent-recon-baseline-s1350-3cdb69d0"
+    },
+    {
+      "id": "reconstruction",
+      "recipe": "fuzzy_topk_reconstruction",
+      "reconstruction_coefficient": 1.0,
+      "auxk_coefficient": 0.0,
+      "issued_mlp_matrix_flops": "18 M D H"
+    },
+    {
+      "id": "reconstruction-auxk",
+      "recipe": "fuzzy_topk_reconstruction_auxk",
+      "reconstruction_coefficient": 1.0,
+      "auxk_coefficient": 0.03125,
+      "aux_k": 320,
+      "auxk_cohort_count": 8,
+      "dead_tokens_threshold": 10000000,
+      "dead_after_steps": 77,
+      "issued_mlp_matrix_flops": "19 M D H"
+    }
+  ],
+  "systems_gate": {
+    "stop_after_step": 120,
+    "required": [
+      "finite compilation, training, reconstruction metrics, and validation",
+      "no out-of-memory or device failure",
+      "unit-row reconstruction decoder invariant after optimization",
+      "complete packed training and full-feature sparsity logs",
+      "reconstruction throughput at least half the paired parent throughput",
+      "AuxK incremental training-time overhead no more than 15 percent versus reconstruction-only"
+    ]
+  },
+  "full_run_metrics": {
+    "primary": [
+      "canonical validation loss",
+      "persistent dead-feature fraction on aligned final sparsity captures"
+    ],
+    "mechanism": [
+      "reconstruction NMSE by layer and step",
+      "AuxK NMSE and positive auxiliary fraction by layer and step",
+      "main-path batch-active and tracked-dead fractions",
+      "dead-group fraction, positive-group rate, and within-group winner entropy"
+    ],
+    "systems": [
+      "tokens per second",
+      "train and compile seconds",
+      "issued FLOPs per token"
+    ]
+  },
+  "evidence_boundary": "This is a paired one-seed mechanism screen on one preemptible v6e-8 topology. It can select or reject the implementation for a later multi-seed ladder, but is not itself a seed-robust quality conclusion."
+}

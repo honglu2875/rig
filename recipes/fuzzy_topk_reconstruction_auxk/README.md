@@ -11,6 +11,10 @@ model. Neither reconstruction output enters the transformer residual stream,
 and the separate decoder is removed from evaluation and saved deployment
 checkpoints.
 
+The paired parent/reconstruction/reconstruction+AuxK mechanism screen is
+predeclared in the sibling recipe's
+[`study-suite-125m-v6e-reconstruction-auxk.json`](../fuzzy_topk_reconstruction/study-suite-125m-v6e-reconstruction-auxk.json).
+
 ## Main path and reconstruction objective
 
 For the RMS-normalized block input `x`, fixed-group fuzzy TopK selects one of

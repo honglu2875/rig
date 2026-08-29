@@ -12,6 +12,11 @@ recipe adds literal residual-reconstruction AuxK to this exact treatment. The
 folders are deliberately separate study arms even though their entry scripts
 share an implementation.
 
+The first paired three-arm mechanism screen is predeclared in
+[`study-suite-125m-v6e-reconstruction-auxk.json`](study-suite-125m-v6e-reconstruction-auxk.json).
+It keeps the parent, reconstruction, and reconstruction+AuxK token schedules
+identical and reports the treatments' additional training work explicitly.
+
 ## Deployed forward pass
 
 Let `x` be the RMS-normalized input to one MLP, `H=16D`, `K=4D`, and
