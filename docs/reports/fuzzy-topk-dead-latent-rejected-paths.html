@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fuzzy TopK dead-feature interventions · rejected paths</title>
+<style>
+:root{--ink:#17202a;--muted:#68737d;--paper:#f7f4ed;--card:#fffdf8;--line:#d9d2c5;--red:#b33a3a;--blue:#236b8e;--gold:#b37518;--green:#28735b}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.58 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{width:min(1120px,calc(100% - 32px));margin:auto;padding:58px 0 72px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.16em;text-transform:uppercase;color:var(--red)}
+h1{max-width:900px;margin:9px 0 18px;font:700 clamp(38px,7vw,78px)/.98 ui-serif,Georgia,serif;letter-spacing:-.045em}.lede{max-width:800px;font-size:19px;color:#47515a}
+.decision{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:34px 0}.decision article,.card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:22px}.decision h2{margin:0 0 8px;font-size:20px}.tag{display:inline-block;border-radius:999px;background:#f7dddd;color:#8f2929;padding:4px 9px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+section{margin-top:48px}.section-head{display:grid;grid-template-columns:1fr minmax(260px,420px);gap:24px;align-items:end;margin-bottom:15px}.section-head h2{margin:0;font:700 34px/1.1 ui-serif,Georgia,serif}.section-head p{margin:0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.chart{overflow:auto}.chart svg{width:100%;min-width:610px;height:auto;display:block}.axis{stroke:#cfc7b9;stroke-width:1}.tick{fill:var(--muted);font-size:12px}.parent{stroke:var(--blue);fill:none;stroke-width:3}.floor{stroke:var(--red);fill:none;stroke-width:3}.dot-p{fill:var(--blue)}.dot-f{fill:var(--red)}.legend{display:flex;gap:18px;color:var(--muted);font-size:13px}.legend i{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:6px}.metric{display:grid;grid-template-columns:1fr auto;gap:5px 16px;padding:13px 0;border-bottom:1px solid var(--line)}.metric:last-child{border-bottom:0}.metric strong{font-variant-numeric:tabular-nums}.metric small{grid-column:1/-1;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}th:first-child,td:first-child{text-align:left}.bad{color:var(--red);font-weight:750}.good{color:var(--green);font-weight:750}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;background:#eee9df;padding:2px 5px;border-radius:5px}.notes{columns:2;column-gap:34px}.notes p{break-inside:avoid;margin-top:0}.links{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}.links a{color:var(--blue);text-decoration:none;border:1px solid var(--line);background:var(--card);padding:8px 11px;border-radius:9px}.footer{margin-top:58px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+@media(max-width:780px){main{padding-top:34px}.decision,.grid,.section-head{grid-template-columns:1fr}.notes{columns:1}.section-head{align-items:start}}
+</style>
+</head>
+<body><main>
+<div class="eyebrow">Fuzzy TopK · dead-feature interventions · 42 new runs</div>
+<h1>Two rescue paths.<br>Neither transfers.</h1>
+<p class="lede">Late feature death in the <code>H=16D, K=4D</code> fuzzy MLP is real, but neither bias-only homeostasis nor a zero-forward ghost gradient is a robust remedy. The first redistributes competition without preserving whole groups at scale; the second barely moves survival and worsens validation.</p>
+
+<div class="decision">
+<article><span class="tag">Rejected path 1</span><h2>Balance / homeostasis</h2><p>A small activation-frequency floor nearly halves persistent death at 60M and lowers it 43% at 125M. At 250M the reduction shrinks to 14%, dead groups increase, and validation worsens by 0.0113 nats. More even winners are not enough when every member of a group falls below ReLU.</p></article>
+<article><span class="tag">Rejected path 2</span><h2>Ghost-AuxK surrogate</h2><p>Tied initialization plus a dead-feature zero-forward cotangent improves survival only 0.29–0.57 percentage points over tied initialization, while adding 11–16% train time and worsening validation. It never advances beyond the 60M mechanism screen.</p></article>
+</div>
+
+<section>
+<div class="section-head"><h2>The balance gain collapses with scale.</h2><p>Persistent-dead fraction over the exact final three treatment capture steps, paired to the same steps in the already-sealed parent runs. Three seeds per tier.</p></div>
+<div class="grid">
+<article class="card chart">
+<svg viewBox="0 0 700 330" role="img" aria-label="Persistent dead feature fraction by model tier">
+<line class="axis" x1="72" x2="670" y1="270" y2="270"/><line class="axis" x1="72" x2="72" y1="30" y2="270"/>
+<line class="axis" x1="72" x2="670" y1="190" y2="190"/><line class="axis" x1="72" x2="670" y1="110" y2="110"/><line class="axis" x1="72" x2="670" y1="30" y2="30"/>
+<text class="tick" x="58" y="274" text-anchor="end">10%</text><text class="tick" x="58" y="194" text-anchor="end">20%</text><text class="tick" x="58" y="114" text-anchor="end">30%</text><text class="tick" x="58" y="34" text-anchor="end">40%</text>
+<text class="tick" x="120" y="298" text-anchor="middle">60M</text><text class="tick" x="370" y="298" text-anchor="middle">125M</text><text class="tick" x="620" y="298" text-anchor="middle">250M</text>
+<path class="parent" d="M120 74.6 L370 63.8 L620 79.0"/><path class="floor" d="M120 208.6 L370 186.9 L620 116.4"/>
+<circle class="dot-p" cx="120" cy="74.6" r="5"/><circle class="dot-p" cx="370" cy="63.8" r="5"/><circle class="dot-p" cx="620" cy="79" r="5"/>
+<circle class="dot-f" cx="120" cy="208.6" r="5"/><circle class="dot-f" cx="370" cy="186.9" r="5"/><circle class="dot-f" cx="620" cy="116.4" r="5"/>
+<text class="tick" x="120" y="63" text-anchor="middle">34.42%</text><text class="tick" x="370" y="52" text-anchor="middle">35.77%</text><text class="tick" x="620" y="67" text-anchor="middle">33.87%</text>
+<text class="tick" x="120" y="228" text-anchor="middle">17.68%</text><text class="tick" x="370" y="207" text-anchor="middle">20.39%</text><text class="tick" x="620" y="136" text-anchor="middle">29.20%</text>
+</svg>
+<div class="legend"><span><i style="background:var(--blue)"></i>public parent</span><span><i style="background:var(--red)"></i>frequency floor</span></div>
+</article>
+<article class="card">
+<div class="metric"><span>60M validation Δ</span><strong>+0.00172</strong><small>Persistent death −48.62%; dead groups −4.17 points.</small></div>
+<div class="metric"><span>125M validation Δ</span><strong>+0.00134</strong><small>Persistent death −42.99%; dead groups −4.49 points.</small></div>
+<div class="metric"><span>250M validation Δ</span><strong class="bad">+0.01133</strong><small>Persistent death only −13.78%; dead groups <span class="bad">+0.49 points</span>.</small></div>
+<div class="metric"><span>Measured train overhead</span><strong>2.15–2.40%</strong><small>The failure is scientific transfer, not a large systems penalty.</small></div>
+</article>
+</div>
+</section>
+
+<section>
+<div class="section-head"><h2>Ghost-AuxK is too weak to ladder.</h2><p>One matched 60M seed. The comparison isolates tied initialization before measuring the incremental ghost path.</p></div>
+<article class="card"><table>
+<thead><tr><th>cell</th><th>120-step time</th><th>overhead</th><th>step-900 dead</th><th>validation</th></tr></thead>
+<tbody>
+<tr><td>independent init, no ghost</td><td>14.631 s</td><td>baseline</td><td>35.88%</td><td>4.4266</td></tr>
+<tr><td>tied init, no ghost</td><td>14.537 s</td><td>−0.6%</td><td>35.25%</td><td>4.4494</td></tr>
+<tr><td>tied, ghost α=1/128</td><td>16.264 s</td><td>+11.2%</td><td class="good">34.96%</td><td class="bad">4.4551</td></tr>
+<tr><td>tied, ghost α=1/32</td><td>16.907 s</td><td>+15.6%</td><td class="good">34.68%</td><td class="bad">4.4596</td></tr>
+<tr><td>tied, ghost α=1/8</td><td>18.364 s</td><td class="bad">+25.5%</td><td colspan="2">systems-gate rejection</td></tr>
+</tbody></table></article>
+</section>
+
+<section>
+<div class="section-head"><h2>What was actually tested</h2><p>These negative results are intentionally narrow. They should not be read as a rejection of reconstruction-based AuxK.</p></div>
+<div class="card notes">
+<p><strong>Balance path.</strong> The selected straight-through frequency floor measures positive winners over the global batch, targets 2.5% per feature inside each four-way group, and sends auxiliary gradient only to deficient entries of the existing encoder bias. It adds no model parameter or evaluation operation.</p>
+<p><strong>Development evidence.</strong> Group-survival hinges reduced death by making activations much denser; hard-load objectives balanced winners but barely changed death; a smooth Switch-style objective cost 51% more wall time. All remain archived as the selection trail.</p>
+<p><strong>Ghost path.</strong> A feature becomes eligible after 10M inactive tokens. Eight rotating cohorts select positive dead choices, then inject <code>g − stop_gradient(g)</code>. The numerical forward is zero; selected encoder columns and decoder rows receive the downstream language-model cotangent.</p>
+<p><strong>Missing ingredient.</strong> Ghost-AuxK has neither a reconstruction decoder nor a stopped reconstruction residual. The later train-only reconstruction-decoder experiment supplies that missing target and is a separate research line.</p>
+</div>
+</section>
+
+<div class="links">
+<a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-balance-homeostasis-rejected">33-run balance archive ↗</a>
+<a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-ghost-auxk-rejected">9-run ghost archive ↗</a>
+<a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-sparsity-diagnostics-ladder">public parent vectors ↗</a>
+<a href="study-browser.html">interactive study browser →</a>
+</div>
+<div class="footer">All 42 new runs completed with clean recorded Git trees on TPU v4-32. Parent controls are referenced by exact run ID and checksum rather than duplicated. Persistent death is absence from three aligned observed global batches, not proof of lifetime inactivity.</div>
+</main></body></html>
