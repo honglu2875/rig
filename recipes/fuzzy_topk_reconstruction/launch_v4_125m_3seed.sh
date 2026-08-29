@@ -94,6 +94,35 @@ run_cell() {
   printf '%q ' "${command[@]}"
   printf '\n'
   "${command[@]}"
+
+  shopt -s nullglob
+  local fresh_results=("${artifact_root}"/*-"${name}"-*/result.json)
+  shopt -u nullglob
+  if ((${#fresh_results[@]} != 1)); then
+    printf 'ERROR: successful run did not produce exactly one result for %s\n' \
+      "${name}" >&2
+    return 1
+  fi
+  local run_dir
+  run_dir=$(dirname "${fresh_results[0]}")
+  .venv/bin/rig verify "${run_dir}"
+
+  # A run gets a unique XLA cache, so a verified result cannot reuse it. Keep
+  # failed-run caches for debugging, but reclaim successful ones before the
+  # next cell so persistent rigvec logs cannot exhaust the controller disk.
+  local run_id=${run_dir##*/}
+  case "${run_id}" in
+    *-"${name}"-*) ;;
+    *)
+      printf 'ERROR: refusing cache cleanup for unexpected run id %s\n' \
+        "${run_id}" >&2
+      return 1
+      ;;
+  esac
+  local cache_path=/tmp/rig-jax-cache-${run_id}
+  if [[ -d "${cache_path}" ]]; then
+    rm -rf -- "${cache_path}"
+  fi
 }
 
 # Systems-only seed 1350 gates. These are not endpoint evidence.
