@@ -59,3 +59,8 @@ metric	18	fuzzy.winner_frequency
 metric	19	fuzzy.activation_frequency
 metric	20	fuzzy.activation_mean
 metric	21	fuzzy.activation_rms
+metric	22	fuzzy.load_balance_loss
+metric	23	fuzzy.importance_balance_loss
+metric	24	fuzzy.alive_margin_loss
+metric	25	fuzzy_auxk.batch_active_fraction
+metric	26	fuzzy_auxk.tracked_dead_fraction

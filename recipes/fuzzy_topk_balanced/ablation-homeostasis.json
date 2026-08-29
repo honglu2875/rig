@@ -1,0 +1,594 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-homeostasis",
+  "status": "mature_frequency_floor_ladder_admitted",
+  "objective": "Reduce late fuzzy Top-K feature death with training-only balance objectives while preserving the exact parent forward model and matched-active-FLOP ladder coordinates.",
+  "prior_evidence": {
+    "source_study": "fuzzy-topk-sparsity-diagnostics-ladder",
+    "finding": "Late zero activation is mostly whole-group ReLU death, with an additional within-group winner-concentration effect.",
+    "mean_final_trailing_dead_fraction": {
+      "60m": 0.34330610275151513,
+      "125m": 0.35761422983939395,
+      "250m": 0.3386662356904762,
+      "500m": 0.36337381979166666
+    }
+  },
+  "hypotheses": {
+    "choice_balance": "A population-level balance loss across the four choices in every fixed group prevents persistent winner monopolies without preventing token specialization.",
+    "group_survival": "A squared hinge on negative group maxima directly prevents the larger failure mode in which all four features fall below ReLU.",
+    "frequency_floor": "A global-batch floor on each feature's positive routing frequency can prevent death while remaining dormant above a declared aggregate group-activity target, avoiding the density pressure of a per-token hinge.",
+    "combination": "Choice balance and group survival address separable mechanisms and may compose better than either alone.",
+    "quality": "A treatment can retain the parent fuzzy validation advantage while materially reducing late dead-feature fractions."
+  },
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "recipe": "fuzzy_topk_balanced",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "mlp": "H=16D, K=4D, fixed group size G=4",
+    "sparse_mlp_backend": "choicewise",
+    "evaluation_forward": "ordinary parent fuzzy Top-K with no auxiliary computation"
+  },
+  "objectives": {
+    "switch": "G * mean_group sum_choice(stop_gradient(hard_load) * mean_soft_probability)",
+    "importance": "mean_group(G * sum_choice(mean_soft_probability^2) - 1)",
+    "hard_bias_report": "G * mean_group sum_choice((stop_gradient(hard_load) - 1/G)^2), with straight-through bias gradient G * (hard_load - 1/G)",
+    "token_margin_alive": "mean_token_group(relu(margin - max_choice(score))^2)",
+    "frequency_floor_alive": "G * mean_group sum_choice(relu(alive_target/G - stop_gradient(positive_route_frequency))^2), with its straight-through gradient applied only to the existing UP bias",
+    "normalization": "Choice statistics and alive loss are reduced over the complete global data-parallel batch; the selected layer losses are averaged across transformer blocks before applying coefficients."
+  },
+  "throughput_gate": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 120,
+    "controls": [
+      "neutral parent path",
+      "exact Switch coefficient 0.01 plus alive coefficient 1.0 at margin 0",
+      "retained-deficit alive coefficient 1.0 at margin 0",
+      "hard-load bias coefficient 0.01 plus retained-deficit alive coefficient 1.0 at margin 0"
+    ],
+    "acceptance": "Both runs complete standard validation and feature captures; balanced training time is no more than 25% slower than neutral, with approximately 20% the desired systems target.",
+    "results": {
+      "neutral": {
+        "run_id": "20260829T004116.855967Z-fuzzy_topk_balanced-60m-homeostasis-neutral-gate-s1350-fa3ae20f",
+        "train_seconds": 15.034,
+        "tokens_per_second": 1046229.786,
+        "validation_loss": 6.2898
+      },
+      "exact_switch_plus_alive": {
+        "run_id": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb",
+        "train_seconds": 22.715,
+        "tokens_per_second": 692648.129,
+        "validation_loss": 6.2834,
+        "slowdown_percent": 51.09,
+        "decision": "rejected for the long prototype screen"
+      },
+      "neutral_low_overhead_revision": {
+        "run_id": "20260829T010222.512307Z-fuzzy_topk_balanced-60m-homeostasis-neutral-v2-gate-s1350-4d9cc097",
+        "train_seconds": 15.286135612986982,
+        "tokens_per_second": 1028948.0872220622,
+        "validation_loss": 6.289775788784027,
+        "mean_dead_fraction_step_120": 0.010683001893939394,
+        "mean_positive_group_rate_step_120": 0.6001044,
+        "mean_normalized_winner_entropy_step_120": 0.8529606388408084
+      },
+      "alive_c1_low_overhead": {
+        "run_id": "20260829T010512.385597Z-fuzzy_topk_balanced-60m-homeostasis-alive-c1-v2-gate-s1350-1172d9da",
+        "train_seconds": 17.383958159945905,
+        "tokens_per_second": 904778.9838933289,
+        "validation_loss": 6.330525636672974,
+        "slowdown_percent": 13.723694464522662,
+        "mean_dead_fraction_step_120": 0.0007398200757575756,
+        "mean_positive_group_rate_step_120": 0.8883037,
+        "mean_normalized_winner_entropy_step_120": 0.887797334228204,
+        "decision": "accepted for the long prototype screen"
+      },
+      "bias_c001_plus_alive_c1_low_overhead": {
+        "run_id": "20260829T010802.757159Z-fuzzy_topk_balanced-60m-homeostasis-bias-c001-alive-c1-v2-ga-4c972d75",
+        "train_seconds": 15.203328568022698,
+        "tokens_per_second": 1034552.3961826487,
+        "validation_loss": 6.289543151855469,
+        "slowdown_percent": -0.5417134000429202,
+        "mean_dead_fraction_step_120": 0.0006214488636363636,
+        "mean_positive_group_rate_step_120": 0.87968594,
+        "mean_normalized_winner_entropy_step_120": 0.8954646675504329,
+        "decision": "accepted for the long prototype screen; negative measured overhead is treated as noise"
+      }
+    },
+    "status": "low_overhead_accepted_soft_objective_rejected"
+  },
+  "prototype_screen": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 900,
+    "schedule_horizon": 2316,
+    "sparsity_diagnostics_every": 50,
+    "alive_mode": "token_margin",
+    "selection_window": "last three captures through step 900",
+    "declared_cells": [
+      {
+        "id": "neutral",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "switch-c001",
+        "mode": "switch",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0,
+        "admission": "rejected by the first soft-objective systems gate"
+      },
+      {
+        "id": "importance-c001",
+        "mode": "importance",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0,
+        "admission": "held out unless a later optimized soft-objective gate passes"
+      },
+      {
+        "id": "bias-c0001",
+        "mode": "bias",
+        "balance_coefficient": 0.001,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "bias-c001",
+        "mode": "bias",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "bias-c01",
+        "mode": "bias",
+        "balance_coefficient": 0.1,
+        "temperature": 1.0,
+        "alive_coefficient": 0.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c01-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 0.1,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c1-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c10-m0",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 10.0,
+        "alive_margin": 0.0
+      },
+      {
+        "id": "alive-c1-m01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.1
+      },
+      {
+        "id": "switch-c001-alive-c1-m0",
+        "mode": "switch",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0,
+        "admission": "rejected by the first soft-objective systems gate"
+      },
+      {
+        "id": "importance-c001-alive-c1-m0",
+        "mode": "importance",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0,
+        "admission": "held out unless a later optimized soft-objective gate passes"
+      },
+      {
+        "id": "bias-c001-alive-c1-m0",
+        "mode": "bias",
+        "balance_coefficient": 0.01,
+        "temperature": 1.0,
+        "alive_coefficient": 1.0,
+        "alive_margin": 0.0
+      }
+    ],
+    "results": {
+      "neutral": {
+        "validation_loss": 4.426563799381256,
+        "trailing_dead_fraction": 0.35876834753787884,
+        "dead_group_fraction": 0.056699810606060615,
+        "positive_group_rate": 0.09816216677427292,
+        "winner_entropy": 0.6490611416613619
+      },
+      "bias-c0001": {
+        "validation_loss": 4.435566008090973,
+        "trailing_dead_fraction": 0.35462535511363635,
+        "positive_group_rate": 0.09663482010364532,
+        "winner_entropy": 0.857101022470694
+      },
+      "bias-c001": {
+        "validation_loss": 4.4366360902786255,
+        "trailing_dead_fraction": 0.3454367897727273,
+        "positive_group_rate": 0.09616312384605408,
+        "winner_entropy": 0.8746870597712779
+      },
+      "bias-c01": {
+        "validation_loss": 4.440454363822937,
+        "trailing_dead_fraction": 0.33012251420454547,
+        "positive_group_rate": 0.09701886028051376,
+        "winner_entropy": 0.8892692554022116
+      },
+      "alive-c01-m0": {
+        "validation_loss": 4.466995000839233,
+        "trailing_dead_fraction": 0.044182054924242424,
+        "positive_group_rate": 0.3359065353870392,
+        "winner_entropy": 0.502018522502827
+      },
+      "alive-c1-m0": {
+        "validation_loss": 4.528049647808075,
+        "trailing_dead_fraction": 0.023274739583333336,
+        "positive_group_rate": 0.6739472150802612,
+        "winner_entropy": 0.4468899791283063
+      },
+      "alive-c10-m0": {
+        "validation_loss": 4.603467702865601,
+        "trailing_dead_fraction": 0.028438683712121212,
+        "positive_group_rate": 0.9343490600585938,
+        "winner_entropy": 0.42964196725778553
+      },
+      "alive-c1-m01": {
+        "validation_loss": 4.608538031578064,
+        "trailing_dead_fraction": 0.017696496212121212,
+        "positive_group_rate": 0.9274297952651978,
+        "winner_entropy": 0.4448176916721337
+      },
+      "bias-c001-alive-c1-m0": {
+        "validation_loss": 4.529335558414459,
+        "trailing_dead_fraction": 0.007235440340909089,
+        "positive_group_rate": 0.6577385067939758,
+        "winner_entropy": 0.452081926757813
+      }
+    },
+    "advance_rule": "Prefer the lowest-complexity declared cell that materially lowers both dead-feature fraction and negative-group incidence versus neutral, preserves within-group winner entropy, and has no catastrophic cross-entropy or gradient-norm regression. Ties are resolved before inspecting other seeds.",
+    "decision": "No token-margin cell advances: survival gains came from raising positive-group rate from 9.8% to 33.6--93.4% and validation worsened monotonically. Hard-bias balance advances only as an optional compositional mechanism because it raised winner entropy to 0.857--0.889 while leaving aggregate activity unchanged, but reduced persistent death by at most 2.9 percentage points.",
+    "status": "complete_no_token_margin_cell_admitted"
+  },
+  "frequency_floor_screen": {
+    "tier": "60m",
+    "seed": 1350,
+    "stop_after_step": 900,
+    "schedule_horizon": 2316,
+    "sparsity_diagnostics_every": 50,
+    "timing_gate_stop_after_step": 120,
+    "selection_window": "last three captures through step 900",
+    "timing_gate": {
+      "neutral": {
+        "train_seconds": 16.551262652035803,
+        "validation_loss": 6.289775788784027,
+        "dead_fraction": 0.010683001893939394,
+        "positive_group_rate": 0.6001043915748596,
+        "winner_entropy": 0.8529606388408084
+      },
+      "frequency-c1-rho01": {
+        "train_seconds": 15.02308818208985,
+        "validation_loss": 6.292913556098938,
+        "dead_fraction": 0.004927201704545455,
+        "positive_group_rate": 0.6250772476196289,
+        "winner_entropy": 0.8757120122762589,
+        "decision": "accepted; negative measured overhead versus neutral is timing noise"
+      },
+      "bias-c01-frequency-c1-rho01": {
+        "train_seconds": 16.933375077089295,
+        "slowdown_percent": 2.309,
+        "validation_loss": 6.257500052452087,
+        "dead_fraction": 0.005223129734848484,
+        "positive_group_rate": 0.6147142052650452,
+        "winner_entropy": 0.8787356780821206,
+        "decision": "accepted for the declared screen"
+      }
+    },
+    "declared_cells": [
+      {
+        "id": "frequency-c01-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 0.1,
+        "alive_target": 0.1
+      },
+      {
+        "id": "frequency-c1-rho005",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.05
+      },
+      {
+        "id": "frequency-c1-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.1
+      },
+      {
+        "id": "frequency-c1-rho02",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.2
+      },
+      {
+        "id": "frequency-c10-rho01",
+        "mode": "none",
+        "balance_coefficient": 0.0,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 10.0,
+        "alive_target": 0.1
+      },
+      {
+        "id": "bias-c01-frequency-c1-rho01",
+        "mode": "bias",
+        "balance_coefficient": 0.1,
+        "alive_mode": "frequency_floor",
+        "alive_coefficient": 1.0,
+        "alive_target": 0.1,
+        "admission": "run only after the standalone floor grid; hard-bias 0.1 is the strongest declared choice-balancing prototype"
+      }
+    ],
+    "results": {
+      "frequency-c01-rho01": {
+        "validation_loss": 4.423897564411163,
+        "dead_fraction": 0.30322265625,
+        "trailing_dead_fraction": 0.25828598484848486,
+        "dead_group_fraction": 0.03864820075757576,
+        "positive_group_rate": 0.09929795563220978,
+        "winner_entropy": 0.6905751481763459,
+        "train_seconds": 112.14925803989172
+      },
+      "frequency-c1-rho005": {
+        "validation_loss": 4.425391674041748,
+        "dead_fraction": 0.2911931818181818,
+        "trailing_dead_fraction": 0.259765625,
+        "dead_group_fraction": 0.03557054924242425,
+        "positive_group_rate": 0.10150133818387985,
+        "winner_entropy": 0.703072155947571,
+        "train_seconds": 113.48051827098243
+      },
+      "frequency-c1-rho01": {
+        "validation_loss": 4.435837626457214,
+        "dead_fraction": 0.31510416666666663,
+        "trailing_dead_fraction": 0.28417968750000006,
+        "dead_group_fraction": 0.0448626893939394,
+        "positive_group_rate": 0.09998249262571335,
+        "winner_entropy": 0.6867396092054802,
+        "train_seconds": 112.28134276415221
+      },
+      "frequency-c1-rho02": {
+        "validation_loss": 4.445957660675049,
+        "dead_fraction": 0.34011008522727276,
+        "trailing_dead_fraction": 0.31429036458333337,
+        "dead_group_fraction": 0.05350378787878789,
+        "positive_group_rate": 0.10391699522733688,
+        "winner_entropy": 0.6719239380764789,
+        "train_seconds": 110.25621347804554
+      },
+      "frequency-c10-rho01": {
+        "validation_loss": 4.430814743041992,
+        "dead_fraction": 0.33750591856060613,
+        "trailing_dead_fraction": 0.30187618371212116,
+        "dead_group_fraction": 0.05385890151515151,
+        "positive_group_rate": 0.10047562420368195,
+        "winner_entropy": 0.6743600679027107,
+        "train_seconds": 110.21724631404504
+      },
+      "bias-c01-frequency-c1-rho01": {
+        "validation_loss": 4.435309529304504,
+        "dead_fraction": 0.3212890625,
+        "trailing_dead_fraction": 0.29902047821969696,
+        "dead_group_fraction": 0.04699337121212121,
+        "positive_group_rate": 0.09897059947252274,
+        "winner_entropy": 0.7157444424640086,
+        "train_seconds": 112.50891227996908
+      }
+    },
+    "advance_rule": "Prefer a target near the parent aggregate positive-group rate that materially lowers persistent dead-feature fraction without making positive-group activity substantially denser or degrading validation. Coefficient ties favor the weaker intervention. Add hard-bias only if its separate winner-entropy gain composes without a quality regression.",
+    "selected": {
+      "id": "frequency-c01-rho01",
+      "mode": "none",
+      "balance_coefficient": 0.0,
+      "alive_mode": "frequency_floor",
+      "alive_coefficient": 0.1,
+      "alive_target": 0.1,
+      "reason": "It is the weakest intervention, has the best validation and trailing persistent-death result in the declared screen, raises winner entropy, and leaves aggregate positive-group activity at the neutral level. Stronger coefficients, higher targets, and hard-bias composition all regress at least survival or validation."
+    },
+    "status": "complete_mature_cell_selected"
+  },
+  "tiers": {
+    "60m": {
+      "layers": 11,
+      "d_model": 384,
+      "dictionary_width": 6144,
+      "retained_width": 1536,
+      "stored_parameters": 97123584,
+      "schedule_steps": 2316
+    },
+    "125m": {
+      "layers": 11,
+      "d_model": 640,
+      "dictionary_width": 10240,
+      "retained_width": 2560,
+      "stored_parameters": 226753280,
+      "schedule_steps": 4656
+    },
+    "250m": {
+      "layers": 14,
+      "d_model": 896,
+      "dictionary_width": 14336,
+      "retained_width": 3584,
+      "stored_parameters": 495053440,
+      "schedule_steps": 9402
+    },
+    "500m": {
+      "layers": 16,
+      "d_model": 1280,
+      "dictionary_width": 20480,
+      "retained_width": 5120,
+      "stored_parameters": 1072968960,
+      "schedule_steps": 19561
+    }
+  },
+  "mature_ladder": {
+    "tiers": [
+      "60m",
+      "125m",
+      "250m"
+    ],
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "sparsity_diagnostics_every": 20,
+    "logging_storage_note": "Cadence 20 preserves exact full-neuron vectors at every retained capture and aligns with every other step of the cadence-10 parent controls. It bounds the nine-run treatment ladder near 6 GB on the 97 GB local volume; cadence 10 would require about 12 GB before compilation caches.",
+    "control_policy": "Reuse the verified same-seed parent fuzzy diagnostic runs only after exact scientific-coordinate and source-provenance comparison.",
+    "control_verification": {
+      "sealed_parent_commit": "aed696d",
+      "forward_source_check": "git diff --exit-code aed696d -- recipes/fuzzy_topk_autoencoder rig/kernels/fuzzy_topk.py is clean; the balanced recipe's neutral-path equivalence is covered by numerical tests.",
+      "coordinate_check": "All nine parent results have status ok and match seed, tier, L, D, H=16D, K=4D, full schedule, batch 16, context 8192, base LR 0.00390625, and choicewise backend. Treatment-only differences are the declared frequency-floor training objective and cadence-20 observer.",
+      "parent_sparsity_diagnostics_every": 10,
+      "parent_run_ids": {
+        "60m-s1337": "20260828T010014.076667Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1337-910ebbcc",
+        "60m-s1338": "20260828T010720.730293Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1338-cdd37f5b",
+        "60m-s1339": "20260828T011428.636932Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1339-7f8b426f",
+        "125m-s1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+        "125m-s1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+        "125m-s1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79",
+        "250m-s1337": "20260828T022449.453967Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1337-9dc93f5a",
+        "250m-s1338": "20260828T034154.231319Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1338-ba68b1be",
+        "250m-s1339": "20260828T045900.979160Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1339-f826e264"
+      }
+    },
+    "launch_policy": "After selecting and versioning one mature treatment, launch nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
+    "stopping_rule": "Each admitted cell runs its complete explicit cosine schedule. A systems failure stops the sequential queue for inspection.",
+    "treatment": {
+      "mode": "none",
+      "balance_coefficient": 0.0,
+      "alive_mode": "frequency_floor",
+      "alive_coefficient": 0.1,
+      "alive_target": 0.1
+    },
+    "feasibility_gate": {
+      "tier": "250m",
+      "seed": 1350,
+      "stop_after_step": 120,
+      "run_id": "20260829T023600.037866Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-feasibility-s13-1fa32318",
+      "reference_run_id": "20260828T005244.940377Z-fuzzy_topk_autoencoder-250m-sparsity-observer-c10-s1350-5783f4dd",
+      "train_compile_seconds": 56.07577574113384,
+      "sparsity_diagnostic_compile_seconds": 14.243115602992475,
+      "train_seconds": 58.155928403837606,
+      "tokens_per_second": 270456.3478168478,
+      "reference_train_seconds": 57.07513278000988,
+      "slowdown_percent_vs_parent_cadence10": 1.8936366350535527,
+      "validation_loss": 6.555294454097748,
+      "dead_fraction": 0.0007174744897959183,
+      "trailing_dead_fraction": 0.00018933354591836737,
+      "positive_group_rate": 0.8856542706489563,
+      "decision": "accepted: compilation, training, validation, and vector diagnostics completed with finite values and no memory failure; the full-schedule qualification threshold is inapplicable to this declared early-stop systems gate"
+    },
+    "status": "admitted_ready_to_launch"
+  },
+  "optional_extension": {
+    "tier": "500m",
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "policy": "Queue only after the mature smaller ladder if the accelerator window permits; otherwise retain as a separately declared continuation.",
+    "status": "not_admitted"
+  },
+  "references": [
+    {
+      "title": "Switch Transformers",
+      "url": "https://www.jmlr.org/papers/v23/21-0998.html",
+      "use": "hard-load times mean-router-probability balance objective"
+    },
+    {
+      "title": "Scaling and evaluating sparse autoencoders",
+      "url": "https://arxiv.org/abs/2406.04093",
+      "use": "precedent for training-only auxiliary signals that target dead latent populations; its reconstruction-residual AuxK is not transplanted into this language-model MLP"
+    }
+  ],
+  "run_ids": {
+    "throughput_gate": {
+      "neutral": "20260829T004116.855967Z-fuzzy_topk_balanced-60m-homeostasis-neutral-gate-s1350-fa3ae20f",
+      "exact_switch_plus_alive": "20260829T004404.869958Z-fuzzy_topk_balanced-60m-homeostasis-combined-gate-s1350-fd045abb",
+      "neutral_low_overhead_revision": "20260829T010222.512307Z-fuzzy_topk_balanced-60m-homeostasis-neutral-v2-gate-s1350-4d9cc097",
+      "alive_c1_low_overhead": "20260829T010512.385597Z-fuzzy_topk_balanced-60m-homeostasis-alive-c1-v2-gate-s1350-1172d9da",
+      "bias_c001_plus_alive_c1_low_overhead": "20260829T010802.757159Z-fuzzy_topk_balanced-60m-homeostasis-bias-c001-alive-c1-v2-ga-4c972d75"
+    },
+    "prototype_screen": {
+      "neutral": "20260829T011320.677569Z-fuzzy_topk_balanced-p900-neutral-s1350-001229b7",
+      "bias-c0001": "20260829T011735.896911Z-fuzzy_topk_balanced-p900-bias-c0001-s1350-d9c48965",
+      "bias-c001": "20260829T012153.672332Z-fuzzy_topk_balanced-p900-bias-c001-s1350-d31e91d7",
+      "bias-c01": "20260829T012606.479319Z-fuzzy_topk_balanced-p900-bias-c01-s1350-59dc7eb4",
+      "alive-c01-m0": "20260829T013015.149706Z-fuzzy_topk_balanced-p900-alive-c01-m0-s1350-6d4e54b1",
+      "alive-c1-m0": "20260829T013425.908956Z-fuzzy_topk_balanced-p900-alive-c1-m0-s1350-9df41d53",
+      "alive-c10-m0": "20260829T013838.991377Z-fuzzy_topk_balanced-p900-alive-c10-m0-s1350-5fda985a",
+      "alive-c1-m01": "20260829T014252.479756Z-fuzzy_topk_balanced-p900-alive-c1-m01-s1350-4318720f",
+      "bias-c001-alive-c1-m0": "20260829T014700.652257Z-fuzzy_topk_balanced-p900-bias-c001-alive-c1-s1350-aac5adbd"
+    },
+    "frequency_timing_gate": {
+      "neutral": "20260829T015607.651696Z-fuzzy_topk_balanced-frequency-gate-neutral-s1350-dfb775a0",
+      "frequency-c1-rho01": "20260829T015850.800021Z-fuzzy_topk_balanced-frequency-gate-c1-rho01-s1350-47aefc7f",
+      "bias-c01-frequency-c1-rho01": "20260829T020134.983963Z-fuzzy_topk_balanced-frequency-gate-bias-c01-c1-rho01-s1350-20e75fee"
+    },
+    "frequency_floor_screen": {
+      "frequency-c01-rho01": "20260829T020441.651585Z-fuzzy_topk_balanced-p900-frequency-c01-rho01-s1350-9cd67ee0",
+      "frequency-c1-rho005": "20260829T020855.015730Z-fuzzy_topk_balanced-p900-frequency-c1-rho005-s1350-8b99d494",
+      "frequency-c1-rho01": "20260829T021312.132380Z-fuzzy_topk_balanced-p900-frequency-c1-rho01-s1350-923be5cc",
+      "frequency-c1-rho02": "20260829T021728.802830Z-fuzzy_topk_balanced-p900-frequency-c1-rho02-s1350-1801f483",
+      "frequency-c10-rho01": "20260829T022142.792339Z-fuzzy_topk_balanced-p900-frequency-c10-rho01-s1350-28200601",
+      "bias-c01-frequency-c1-rho01": "20260829T022550.712241Z-fuzzy_topk_balanced-p900-bias-c01-frequency-c1-rho01-s1350-e2111dbf"
+    },
+    "mature_ladder": {
+      "250m_feasibility_gate": "20260829T023600.037866Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-feasibility-s13-1fa32318",
+      "250m_parent_cadence10_reference": "20260828T005244.940377Z-fuzzy_topk_autoencoder-250m-sparsity-observer-c10-s1350-5783f4dd"
+    }
+  }
+}

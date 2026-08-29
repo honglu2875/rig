@@ -1,0 +1,359 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-paper-inspired-dead-feature-recovery",
+  "status": "mechanism_screen_complete_no_paper_cell_admitted",
+  "objective": "Compare parent fuzzy Top-K, the selected activation-frequency floor, and a paper-inspired tied-initialization plus dead-feature ghost-gradient treatment on identical 60M/125M/250M ladder coordinates.",
+  "paper": {
+    "title": "Scaling and evaluating sparse autoencoders",
+    "openreview": "https://openreview.net/forum?id=tcsZt9ZNKD",
+    "arxiv": "https://arxiv.org/abs/2406.04093",
+    "official_code": "https://github.com/openai/sparse_autoencoder",
+    "transferred_mechanisms": [
+      "encoder and decoder directions tied at initialization, then optimized as separate parameters",
+      "dead state based on no positive main activation for ten million tokens",
+      "an auxiliary sparse path with approximately d_model/2 selected dead features"
+    ],
+    "declared_adaptation": "The SAE reconstructs its input and AuxK reconstructs its reconstruction residual. A transformer MLP has no such reconstruction target. This study instead uses a zero-forward ghost path whose parameter gradients receive the downstream language-model cotangent; it is paper-inspired, not literal AuxK."
+  },
+  "common": {
+    "accelerator": "TPU v4",
+    "cluster": "v4-32",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "profile": "dev",
+    "context": "8k",
+    "document_masking": true,
+    "batch_size": 16,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "mlp": "H=16D, K=4D, fixed main group size 4",
+    "sparse_mlp_backend": "choicewise",
+    "evaluation_forward": "ordinary parent fuzzy Top-K with no auxiliary state or computation",
+    "branch": "research/fuzzy-topk-auxk",
+    "base_commit": "6243cbb",
+    "implementation_commit": "f2d83daa2275ee54608b124fb7890c8f5b2c1053"
+  },
+  "paper_arm": {
+    "recipe": "fuzzy_topk_auxk",
+    "initialization": {
+      "mode": "tied_directions",
+      "formula": "W_down[h, :] = W_up[:, h] at step zero",
+      "untied_after_initialization": true,
+      "scale_policy": "retain the CompleteP marginal initialization scale; do not apply SAE decoder unit normalization",
+      "rng_policy": "consume the independent DOWN draw so every non-DOWN parameter remains seed-identical to the parent"
+    },
+    "dead_state": {
+      "threshold_tokens": 10000000,
+      "threshold_steps": 77,
+      "reset_event": "positive main-path activation in the complete global batch",
+      "auxiliary_activity_resets_age": false,
+      "storage": "one saturating int32 age per layer and stored feature"
+    },
+    "ghost": {
+      "numerical_forward": "y_main + alpha * (g - stop_gradient(g)) = y_main",
+      "input_gradient": "main path only",
+      "parameter_gradients": [
+        "selected dead columns of W_up",
+        "selected dead entries of b_up",
+        "selected dead rows of W_down"
+      ],
+      "excluded_gradient": "no auxiliary gradient to b_down",
+      "aux_k": "D/2",
+      "cohort_count": 8,
+      "cohort_schedule": "optimizer_step modulo 8",
+      "feature_scoring": "shared with the main forward; no second UP projection",
+      "issued_mlp_matrix_work": "12.75 M D H versus parent 12 M D H"
+    }
+  },
+  "systems_gate": {
+    "tier": "60m",
+    "seed": 1350,
+    "schedule_horizon": 2316,
+    "stop_after_step": 120,
+    "sparsity_diagnostics_every": 50,
+    "declared_cells": [
+      {
+        "id": "parent-init-no-ghost",
+        "init_mode": "independent",
+        "auxk_mode": "none",
+        "auxk_coefficient": 0.0
+      },
+      {
+        "id": "tied-init-no-ghost",
+        "init_mode": "tied_directions",
+        "auxk_mode": "none",
+        "auxk_coefficient": 0.0
+      },
+      {
+        "id": "tied-ghost-c00078125",
+        "init_mode": "tied_directions",
+        "auxk_mode": "ghost",
+        "auxk_coefficient": 0.0078125
+      },
+      {
+        "id": "tied-ghost-c003125",
+        "init_mode": "tied_directions",
+        "auxk_mode": "ghost",
+        "auxk_coefficient": 0.03125
+      },
+      {
+        "id": "tied-ghost-c0125",
+        "init_mode": "tied_directions",
+        "auxk_mode": "ghost",
+        "auxk_coefficient": 0.125
+      }
+    ],
+    "acceptance": {
+      "systems": "finite compilation/training/evaluation and full-vector diagnostics, no memory failure, and no more than 25% wall-time overhead versus the paired parent-init control",
+      "desired_overhead": "approximately 20% or lower",
+      "state": "dead ages begin changing immediately, ghost eligibility begins exactly after 77 steps, and auxiliary activity never resets age"
+    },
+    "results": {
+      "parent-init-no-ghost": {
+        "run_id": "20260829T100843.114706Z-fuzzy_topk_auxk-60m-auxk-gate-parent-init-no-ghost-s1350-8d33dfad",
+        "verified": true,
+        "train_seconds": 14.631288120057434,
+        "tokens_per_second": 1075000.3602511424,
+        "overhead_fraction": 0.0,
+        "train_loss": 6.300580024719238,
+        "validation_loss": 6.289775788784027,
+        "train_compile_seconds": 37.35294266813435,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-init-no-ghost": {
+        "run_id": "20260829T101122.130756Z-fuzzy_topk_auxk-60m-auxk-gate-tied-init-no-ghost-s1350-bb3a800c",
+        "verified": true,
+        "train_seconds": 14.537473906064406,
+        "tokens_per_second": 1081937.6255897314,
+        "overhead_fraction": -0.006411890273995913,
+        "train_loss": 6.27720832824707,
+        "validation_loss": 6.254095017910004,
+        "train_compile_seconds": 35.43384515377693,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c00078125": {
+        "run_id": "20260829T101355.683878Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c00078125-s1350-22cf3a2c",
+        "verified": true,
+        "train_seconds": 16.26361490203999,
+        "tokens_per_second": 967106.0274568548,
+        "overhead_fraction": 0.11156411989077486,
+        "train_loss": 6.283992767333984,
+        "validation_loss": 6.26811158657074,
+        "train_compile_seconds": 41.35074754199013,
+        "final_batch_active_fraction": 0.9773319363594055,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c003125": {
+        "run_id": "20260829T101644.157975Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c003125-s1350-c3ac54ac",
+        "verified": true,
+        "train_seconds": 16.907050242181867,
+        "tokens_per_second": 930300.6600618114,
+        "overhead_fraction": 0.15554079062968373,
+        "train_loss": 6.283625602722168,
+        "validation_loss": 6.267491459846497,
+        "train_compile_seconds": 43.10617860988714,
+        "final_batch_active_fraction": 0.9773911237716675,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": true
+      },
+      "tied-ghost-c0125": {
+        "run_id": "20260829T101940.802907Z-fuzzy_topk_auxk-60m-auxk-gate-tied-ghost-c0125-s1350-8ce2cce6",
+        "verified": true,
+        "train_seconds": 18.36438222695142,
+        "tokens_per_second": 856475.3121352906,
+        "overhead_fraction": 0.25514459672053347,
+        "train_loss": 6.283602714538574,
+        "validation_loss": 6.268253147602081,
+        "train_compile_seconds": 40.282109554857016,
+        "final_batch_active_fraction": 0.9770804047584534,
+        "final_tracked_dead_fraction": 2.9592803912237287e-05,
+        "admitted_to_mechanism_screen": false,
+        "exclusion_reason": "25.514% wall-time overhead exceeds the predeclared 25% ceiling"
+      }
+    },
+    "status": "complete_4_of_5_admitted"
+  },
+  "mechanism_screen": {
+    "tier": "60m",
+    "seed": 1350,
+    "schedule_horizon": 2316,
+    "stop_after_step": 900,
+    "sparsity_diagnostics_every": 50,
+    "cells": "Every systems-admitted declared cell; no unrecorded coefficient retries.",
+    "admitted_cells": [
+      "parent-init-no-ghost",
+      "tied-init-no-ghost",
+      "tied-ghost-c00078125",
+      "tied-ghost-c003125"
+    ],
+    "selection_window": "last three full-neuron captures through step 900",
+    "selection_metrics": [
+      "persistent dead-feature fraction",
+      "current-batch dead-feature fraction",
+      "positive group rate",
+      "normalized within-group winner entropy",
+      "validation loss",
+      "gradient norm and numerical stability",
+      "measured training time"
+    ],
+    "selection_rule": "Choose the weakest ghost coefficient that materially improves persistent death beyond tied-only without a material validation regression. Tied-only remains a mechanism ablation and cannot be silently folded into the ghost effect.",
+    "results": {
+      "parent-init-no-ghost": {
+        "run_id": "20260829T102623.461749Z-fuzzy_topk_auxk-60m-auxk-p900-parent-init-no-ghost-s1350-e9466212",
+        "verified": true,
+        "train_seconds": 106.98018307308666,
+        "tokens_per_second": 1102678.987933764,
+        "train_loss": 4.454296588897705,
+        "validation_loss": 4.426563799381256,
+        "final_batch_dead_fraction": 0.3677793560606061,
+        "trailing_persistent_dead_fraction": 0.3587683475378788,
+        "final_dead_group_fraction": 0.05669981060606061,
+        "final_positive_group_rate": 0.09816216677427292,
+        "final_winner_entropy": 0.6490611416613621
+      },
+      "tied-init-no-ghost": {
+        "run_id": "20260829T103036.917878Z-fuzzy_topk_auxk-60m-auxk-p900-tied-init-no-ghost-s1350-de5beaac",
+        "verified": true,
+        "train_seconds": 108.43988909106702,
+        "tokens_per_second": 1087835.8599291267,
+        "train_loss": 4.483163833618164,
+        "validation_loss": 4.449376046657562,
+        "final_batch_dead_fraction": 0.3614464962121212,
+        "trailing_persistent_dead_fraction": 0.3524798768939394,
+        "final_dead_group_fraction": 0.031782670454545456,
+        "final_positive_group_rate": 0.09065664559602737,
+        "final_winner_entropy": 0.6641883094316222
+      },
+      "tied-ghost-c00078125": {
+        "run_id": "20260829T103446.992198Z-fuzzy_topk_auxk-60m-auxk-p900-tied-ghost-c00078125-s1350-35ca7ebc",
+        "verified": true,
+        "train_seconds": 118.92497645691037,
+        "tokens_per_second": 991926.2001514185,
+        "train_loss": 4.479305744171143,
+        "validation_loss": 4.4551262855529785,
+        "final_batch_dead_fraction": 0.35890151515151514,
+        "trailing_persistent_dead_fraction": 0.3495797821969697,
+        "final_dead_group_fraction": 0.029415246212121212,
+        "final_positive_group_rate": 0.09205638617277145,
+        "final_winner_entropy": 0.6689837485913026,
+        "final_tracked_dead_fraction": 0.33504971861839294,
+        "admitted_to_ladder": false
+      },
+      "tied-ghost-c003125": {
+        "run_id": "20260829T103924.382319Z-fuzzy_topk_auxk-60m-auxk-p900-tied-ghost-c003125-s1350-807be799",
+        "verified": true,
+        "train_seconds": 118.9980865221005,
+        "tokens_per_second": 991316.780359249,
+        "train_loss": 4.4831438064575195,
+        "validation_loss": 4.459597647190094,
+        "final_batch_dead_fraction": 0.35640092329545453,
+        "trailing_persistent_dead_fraction": 0.3467684659090909,
+        "final_dead_group_fraction": 0.030184659090909092,
+        "final_positive_group_rate": 0.09343647211790085,
+        "final_winner_entropy": 0.6674024206765277,
+        "final_tracked_dead_fraction": 0.33161696791648865,
+        "admitted_to_ladder": false
+      }
+    },
+    "decision": "No ghost cell advances. Relative to tied-only, 1/128 lowers trailing persistent death by only 0.290 percentage points and regresses validation by 0.00575; 1/32 lowers it by only 0.571 points and regresses validation by 0.01022. These are monotonic but not material recovery effects, especially against the approximately ten-point improvement of the existing frequency-floor arm.",
+    "selected": null,
+    "status": "complete_no_mature_cell_admitted"
+  },
+  "tiers": {
+    "60m": {
+      "layers": 11,
+      "d_model": 384,
+      "dictionary_width": 6144,
+      "main_k": 1536,
+      "aux_k": 192,
+      "stored_parameters": 97123584,
+      "schedule_steps": 2316
+    },
+    "125m": {
+      "layers": 11,
+      "d_model": 640,
+      "dictionary_width": 10240,
+      "main_k": 2560,
+      "aux_k": 320,
+      "stored_parameters": 226753280,
+      "schedule_steps": 4656
+    },
+    "250m": {
+      "layers": 14,
+      "d_model": 896,
+      "dictionary_width": 14336,
+      "main_k": 3584,
+      "aux_k": 448,
+      "stored_parameters": 495053440,
+      "schedule_steps": 9402
+    }
+  },
+  "three_arm_ladder": {
+    "tiers": [
+      "60m",
+      "125m",
+      "250m"
+    ],
+    "seeds": [
+      1337,
+      1338,
+      1339
+    ],
+    "arms": {
+      "parent_fuzzy": {
+        "recipe": "fuzzy_topk_autoencoder",
+        "initialization": "independent",
+        "training_only_signal": "none",
+        "status": "complete_reuse_pending_coordinate_audit",
+        "run_ids": {
+          "60m-s1337": "20260828T010014.076667Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1337-910ebbcc",
+          "60m-s1338": "20260828T010720.730293Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1338-cdd37f5b",
+          "60m-s1339": "20260828T011428.636932Z-fuzzy_topk_autoencoder-60m-fuzzy-sparsity-c10-s1339-7f8b426f",
+          "125m-s1337": "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+          "125m-s1338": "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+          "125m-s1339": "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79",
+          "250m-s1337": "20260828T022449.453967Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1337-9dc93f5a",
+          "250m-s1338": "20260828T034154.231319Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1338-ba68b1be",
+          "250m-s1339": "20260828T045900.979160Z-fuzzy_topk_autoencoder-250m-fuzzy-sparsity-c10-s1339-f826e264"
+        }
+      },
+      "frequency_floor": {
+        "recipe": "fuzzy_topk_balanced",
+        "initialization": "independent",
+        "training_only_signal": "frequency_floor coefficient 0.1, aggregate group target 0.1",
+        "status": "complete_reuse_pending_coordinate_audit",
+        "run_ids": {
+          "60m-s1337": "20260829T024525.062802Z-fuzzy_topk_balanced-60m-frequency-c01-rho01-c20-s1337-6b20600e",
+          "60m-s1338": "20260829T025232.044689Z-fuzzy_topk_balanced-60m-frequency-c01-rho01-c20-s1338-f69642ec",
+          "60m-s1339": "20260829T025942.530314Z-fuzzy_topk_balanced-60m-frequency-c01-rho01-c20-s1339-e750cf9b",
+          "125m-s1337": "20260829T030656.015459Z-fuzzy_topk_balanced-125m-frequency-c01-rho01-c20-s1337-7dd5f437",
+          "125m-s1338": "20260829T032808.278714Z-fuzzy_topk_balanced-125m-frequency-c01-rho01-c20-s1338-16ed7ccc",
+          "125m-s1339": "20260829T034920.271852Z-fuzzy_topk_balanced-125m-frequency-c01-rho01-c20-s1339-1da9ad78",
+          "250m-s1337": "20260829T041025.253215Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-c20-s1337-b1bf6ab8",
+          "250m-s1338": "20260829T052915.892110Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-c20-s1338-80df70f4",
+          "250m-s1339": "20260829T064806.543709Z-fuzzy_topk_balanced-250m-frequency-c01-rho01-c20-s1339-9ccceef5"
+        }
+      },
+      "paper_inspired": {
+        "recipe": "fuzzy_topk_auxk",
+        "initialization": "tied_directions",
+        "training_only_signal": "selected declared ghost cell",
+        "status": "not_admitted_after_mechanism_screen",
+        "run_ids": {}
+      }
+    },
+    "sparsity_diagnostics_every": 20,
+    "feasibility_gate": {
+      "tier": "250m",
+      "seed": 1350,
+      "stop_after_step": 120,
+      "status": "not_started"
+    },
+    "launch_policy": "After selecting one declared mature paper cell and passing the 250M feasibility gate, launch its nine cells sequentially in increasing tier and seed order. Never retry, select, or terminate based on scientific intermediate metrics.",
+    "stopping_rule": "Every admitted cell runs its complete explicit cosine schedule. A systems failure pauses the sequential queue for inspection.",
+    "status": "paper_arm_screen_failed_no_ladder_queued"
+  }
+}

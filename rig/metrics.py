@@ -122,6 +122,16 @@ _AXES_AND_SCALARS = (
     Metric(19, "fuzzy.activation_frequency"),
     Metric(20, "fuzzy.activation_mean"),
     Metric(21, "fuzzy.activation_rms"),
+    # Training-only fuzzy TopK homeostasis objectives. Model-wide and per-block
+    # values share these ids; the logpack scope distinguishes them.
+    Metric(22, "fuzzy.load_balance_loss"),
+    Metric(23, "fuzzy.importance_balance_loss"),
+    Metric(24, "fuzzy.alive_margin_loss"),
+    # Paper-inspired fuzzy AuxK state. The first is the fraction of stored
+    # features activated by the main path in this global batch; the second is
+    # the fraction whose no-activation age reached the dead-token threshold.
+    Metric(25, "fuzzy_auxk.batch_active_fraction"),
+    Metric(26, "fuzzy_auxk.tracked_dead_fraction"),
 )
 
 _DIAGNOSTIC_FAMILY_BASES = (("param", 100), ("grad", 200), ("update", 300))

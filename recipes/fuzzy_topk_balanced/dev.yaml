@@ -1,0 +1,124 @@
+# Standalone development configuration for recipes/fuzzy_topk_balanced/train.py.
+#
+# Scientific model and optimizer settings intentionally match config.yaml. The
+# shorter horizon and denser reporting make this suitable for research sweeps.
+schema_version: 6
+execution_type: dev
+family:
+  default_tier: 125m
+  default_context: 8k
+  contexts:
+    1k:
+      seq_len: 1024
+      reference_batch_size: 128
+      document_masking: false
+    8k:
+      seq_len: 8192
+      reference_batch_size: 16
+      document_masking: true
+  parameterization:
+    name: completep_fixed_tpp_v1
+    base_tier: 60m
+    depth_alpha: 1.0
+    init_std: 0.02
+    attention_scale: inverse_head_dim
+    embeddings: untied
+  tiers:
+    60m:
+      model:
+        layers: 12
+        heads: 6
+        d_model: 384
+        mlp_mult: 16
+        mlp_top_k: 128
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    125m:
+      model:
+        layers: 12
+        heads: 10
+        d_model: 640
+        mlp_mult: 16
+        mlp_top_k: 128
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    250m:
+      model:
+        layers: 16
+        heads: 14
+        d_model: 896
+        mlp_mult: 16
+        mlp_top_k: 128
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    500m:
+      model:
+        layers: 19
+        heads: 20
+        d_model: 1280
+        mlp_mult: 16
+        mlp_top_k: 128
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+    1b:
+      model:
+        layers: 21
+        heads: 28
+        d_model: 1792
+        mlp_mult: 16
+        mlp_top_k: 128
+        normalization: rms_norm
+        position_encoding: rope_base_10000
+        mlp_activation: fuzzy_topk_relu
+        vocab_size: 50304
+        semantic_vocab_size: 50304
+
+run:
+  training:
+    duration:
+      tokens_per_parameter: 5.0
+    sampling: shuffled_epochs
+    dtype: bfloat16
+  kernels:
+    attention_backend: tpu_flash
+    sparse_mlp_backend: choicewise
+    loss_backend: tiled
+    vocab_tile_size: 2048
+  optimizer:
+    # 2^-8, the optimum measured by the fixed-TPP learning-rate sweep at
+    # 60M/125M and by both depth ablations. See docs/HYPERPARAMETER_TRANSFER.md.
+    learning_rate: 0.00390625
+    min_lr_ratio: 0.1
+    warmup_ratio: 0.1
+    weight_decay: 0.1
+    adam_epsilon: 1.0e-8
+    beta1: 0.9
+    beta2: 0.95
+    grad_clip: 0.0
+  balance:
+    mode: none
+    coefficient: 0.0
+    temperature: 1.0
+    alive_coefficient: 0.0
+    alive_mode: token_margin
+    alive_margin: 0.0
+    alive_target: 0.1
+  evaluation:
+    final_predictions: 1048576
+    probe: null
+  logging:
+    diagnostics_every: 10
+    sparsity_diagnostics_every: 100
+    log_every: 10
