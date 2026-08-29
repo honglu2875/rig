@@ -49,28 +49,47 @@ Three interchangeable choice-balance objectives are implemented:
 ```text
 L_switch = mean_g G * sum_c load[g,c] * importance[g,c]
 L_importance = mean_g (G * sum_c importance[g,c]^2 - 1)
-L_bias = mean_g G * sum_c (load[g,c] - 1/G) * b_up[g,c]
+L_bias_report = mean_g G * sum_c (load[g,c] - 1/G)^2
+dL_bias/db_up := mean_g G * (load[g,c] - 1/G)   # straight-through
 ```
 
 `L_switch` is the fixed-group analogue of the Switch Transformer auxiliary
 loss. Its minimum is one. `L_importance` is a fully smooth population
 concentration penalty with minimum zero. Neither objective forces every token
 to use every feature; both ask different tokens in the global batch to
-distribute their choices across the four stored features. `L_bias` treats hard
-load as a stop-gradient target and moves only the existing encoder biases:
-overused choices are pushed down and underused choices up. Centering each
-group's load makes it invariant to common bias shifts. It is a low-overhead
-surrogate rather than a smooth probability objective.
+distribute their choices across the four stored features. `L_bias` reports
+nonnegative hard-load imbalance, then uses the displayed straight-through
+gradient to move only the existing encoder biases: overused choices are pushed
+down and underused choices up. Centering each group's load makes it invariant
+to common bias shifts. It is a low-overhead surrogate rather than a smooth
+probability objective.
 
-The orthogonal group-survival objective is
+Two orthogonal group-survival objectives are available. The original per-token
+margin is
 
 ```text
 L_alive = mean_{t,g} ReLU(alive_margin - max_c z[t,g,c])^2
 ```
 
 It is exactly zero for groups whose winner clears the requested margin. With a
-zero margin it acts only when the whole group would be erased by ReLU. A run may
-use either choice objective, the survival objective, or both:
+zero margin it acts only when the whole group would be erased by ReLU. Because
+it pressures every group-token pair, it can also make the representation much
+denser than the parent. The targeted alternative measures
+
+```text
+active[g,c] = mean_t 1[winner[t,g] = c and max_c z[t,g,c] > 0]
+target_per_feature = alive_target / G
+deficit[g,c] = ReLU(target_per_feature - active[g,c])
+L_frequency_report = mean_g G * sum_c deficit[g,c]^2
+dL_frequency/db_up := mean_g -2G * deficit[g,c]   # straight-through
+```
+
+Here `alive_target` is the desired aggregate positive-routing frequency per
+group, not the desired frequency of each choice. The global-batch counts are
+stop-gradient. Therefore the floor is dormant for healthy features and pushes
+only an under-frequency feature's existing encoder bias upward. It cannot force
+more than the declared aggregate activity target on its own. A run may use
+either choice objective, either survival objective, or both:
 
 ```text
 L_train = L_CE + balance_coefficient * L_choice
@@ -87,14 +106,15 @@ The balanced custom VJP shares feature scoring with the ordinary forward pass
 and merges every auxiliary cotangent into the existing choicewise `dX`,
 `dW_up`, and `db_up` contractions. The decoder forward and gradients are
 unchanged. Smooth choice objectives recompute feature scores once in reverse
-mode. The low-overhead path instead retains one float32 survival deficit per
-group; hard-load bias balance differentiates directly through `b_up`. For `M`
-tokens, physical MLP matrix work is
+mode. The low-overhead token-margin path instead retains one float32 survival
+deficit per group; the frequency-floor path reduces positive winner counts to
+one float32 value per stored feature. Both straight-through objectives
+differentiate only through `b_up`. For `M` tokens, physical MLP matrix work is
 
 ```text
-smooth Switch / importance = 14 M D H
-alive and/or hard-bias      = 12 M D H
-neutral parent              = 12 M D H
+smooth Switch / importance       = 14 M D H
+either survival and/or hard-bias = 12 M D H
+neutral parent                    = 12 M D H
 ```
 
 The smooth path's intended matrix-work premium is 16.7%, not another dense
@@ -124,6 +144,7 @@ objective differs.
 | importance balance | identical | smooth importance concentration | `14MDH` |
 | hard-bias balance | identical | centered hard load x existing UP bias | `12MDH` |
 | alive margin | identical | negative group-maximum hinge | `12MDH` |
+| activation-frequency floor | identical | under-frequency positive winners | `12MDH` |
 | hard-bias + alive | identical | choice balance + group survival | `12MDH` |
 
 The existing uninstrumented and per-feature parent runs remain valid controls;
@@ -158,12 +179,15 @@ A treatment advances only if it:
 4. is chosen from the declared grid, never from unrecorded retries.
 
 The mature treatment is then run for paired seeds 1337--1339 at 60M, 125M, and
-250M, with the original fuzzy per-feature observer at cadence 10. The complete
-schedule, validation contract, and data order stay fixed. A systems failure
-stops the sequential queue for inspection; scientific intermediate metrics do
-not stop or retry a run. A 500M extension is queued only if the smaller ladder
-finishes within the available accelerator window or remains useful as a
-separate continuation.
+250M, with the original fuzzy per-feature observer at cadence 20. Each capture
+still stores the exact full-neuron vectors, and every retained step aligns with
+the cadence-10 parent controls. Cadence 20 bounds the new nine-run dataset near
+6 GB on the 97 GB local volume; cadence 10 would need roughly 12 GB before
+compilation caches. The complete schedule, validation contract, and data order
+stay fixed. A systems failure stops the sequential queue for inspection;
+scientific intermediate metrics do not stop or retry a run. A 500M extension
+is queued only if the smaller ladder finishes within the available accelerator
+window or remains useful as a separate continuation.
 
 ## CLI
 
@@ -178,5 +202,7 @@ uv run rig run fuzzy_topk_balanced --cluster v4-32 --profile dev \
 
 `--fuzzy-balance-mode` is `none`, `switch`, `importance`, or `bias`.
 Coefficients and temperature must be positive when choice balance is enabled.
-The alive coefficient and margin are independent nonnegative values. All
-homeostasis objectives require the `choicewise` sparse MLP backend.
+`--fuzzy-alive-mode` selects `token_margin` or `frequency_floor`. The alive
+coefficient is independent of choice balance; margin applies to `token_margin`,
+while `--fuzzy-alive-target` is in `(0, 1]` and applies to `frequency_floor`.
+All homeostasis objectives require the `choicewise` sparse MLP backend.
