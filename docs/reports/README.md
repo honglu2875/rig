@@ -8,8 +8,10 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 505 runs across twenty-two studies, laid out as `<study>/<run-name>/`, at full
-recorded resolution. That is the archive of record; its
+— 528 archived run folders representing 522 unique run IDs across twenty-three
+studies, laid out as `<study>/<run-name>/`, at full recorded resolution. Six
+controls are intentionally repeated inside the self-contained reconstruction
+study. That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
 
@@ -56,6 +58,7 @@ by-product:
 | fuzzy-topk-three-arm-ladder | exact endpoints + paired-seed/compute tables | — | 0.03 MB |
 | fuzzy-topk-sparsity-diagnostics | exact mechanism reductions + 40.19 GiB raw vectors | — | 0.02 MB |
 | fuzzy-topk-dead-latent-rejected-paths | exact endpoints + mechanism decisions | — | 0.01 MB |
+| fuzzy-topk-reconstruction-125m | exact endpoints + paired intervals + probe reductions | — | 0.02 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -133,13 +136,21 @@ exact endpoints and derived feature-survival reductions, inline SVG, and no
 runtime fetch. Parent runs are referenced from the existing sparsity study by
 exact run ID rather than archived again.
 
+`fuzzy-topk-reconstruction-125m.html` is a static findings report over 23
+archived entries: a three-seed reconstruction-coefficient sweep, literal AuxK,
+and a held-out-seed long-horizon pair. It distinguishes the incremental
+reconstruction contrast from the combined fuzzy-versus-dense contrast, reports
+paired intervals and relative cross-entropy/perplexity effects, and shows the
+quality–feature-survival frontier. The page uses exact endpoints and fixed
+validation probes, inline SVG, and no runtime fetch.
+
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
 registry cannot make. Ordinary report metrics remain lines against time or
-layer. The fuzzy sparsity study is the one explicit exception: it precomputes
+layer. The fuzzy vector studies are the explicit exception: they precompute
 zero-aware log-frequency histograms and positive quantiles from full-neuron
-vectors and renders them with dedicated histogram, ridgeline, and heatmap
-views rather than bending a distribution into a scalar timeline.
+vectors and render them with dedicated histogram, ridgeline, and heatmap views
+rather than bending a distribution into a scalar timeline.
 
 ## The study browser
 
@@ -153,8 +164,11 @@ it starts: 6.4 MB for the 8k sweep, 138 MB for the 500M one. Nothing downloads
 on load.
 
 Every study export publishes both browser views: a compact overview snapshot
-and an explicitly loaded `full.json.gz` containing every recorded point. The
-raw `.riglog` files remain the archive of record. Every report payload the
+and an explicitly loaded `full.json.gz`. Existing studies retain every
+recorded point in that expanded payload. The reconstruction study is the first
+declared exception: its 5.52 MB expanded view keeps at most 2,048 points per
+run-series and 32 layer frames, while its 4.60 GB raw archive remains lossless.
+The browser labels that action “expanded,” not “full.” Every report payload the
 browser fetches is ordinary JSON, so the page never needs to understand the
 packed log format.
 
@@ -220,6 +234,11 @@ chips for all 42 new runs. The balance scale-up is paired to exact controls on
 that same topology in the already-sealed sparsity study; the ghost path is a
 one-seed 60M mechanism screen.
 
+The fuzzy TopK reconstruction study also stays on TPU v4 at 4 processes and 16
+chips. Its short sweep uses three paired seeds; its long-horizon pair uses one
+held-out seed. Physical reconstruction work is reported rather than equalized:
+the ladder coordinate remains total deployed active matrix FLOPs.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -242,13 +261,14 @@ one-seed 60M mechanism screen.
 | [fuzzy-topk-three-arm-ladder](fuzzy-topk-three-arm-ladder.html) | 24 | 60M/125M/250M | dense vs fuzzy TopK vs double-fuzzy at matched active FLOPs | [`fuzzy-topk-three-arm-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder) |
 | [fuzzy-topk-sparsity-diagnostics](fuzzy-topk-sparsity-diagnostics.html) | 12 | 60M/125M/250M/500M | per-feature fuzzy TopK activity over training | [`fuzzy-topk-sparsity-diagnostics-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-sparsity-diagnostics-ladder) |
 | [fuzzy-topk-dead-latent-rejected-paths](fuzzy-topk-dead-latent-rejected-paths.html) | 42 | 60M/125M/250M | balance/homeostasis and zero-forward ghost-AuxK | [`fuzzy-topk-balance-homeostasis-rejected`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-balance-homeostasis-rejected), [`fuzzy-topk-ghost-auxk-rejected`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-ghost-auxk-rejected) |
+| [fuzzy-topk-reconstruction-125m](fuzzy-topk-reconstruction-125m.html) | 23 | 125M | reconstruction coefficient, literal AuxK, held-out-seed 20-TPP pair | [`fuzzy-topk-reconstruction-125M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-reconstruction-125M) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
-curves) and a full-resolution `full.json.gz` for the study browser's explicit
-full-view action. Some studies carry a separate diagnostic snapshot. The
-compact snapshots are what the browser and derived visualizations load before
-anything larger.
+curves) and an explicit expanded `full.json.gz`. The latter is lossless for the
+older studies and deliberately bounded only for the reconstruction study.
+Some studies carry a separate diagnostic snapshot. Compact snapshots are what
+the browser and derived visualizations load before anything larger.
 
 ---
 
@@ -863,6 +883,45 @@ Both archives carry exact ledgers, full-neuron vectors, compact/full browser
 payloads, launch scripts, source tarballs, and a complete Git bundle for the
 intentionally unmerged research histories. The external parent mapping is
 explicit in the balance analysis JSON.
+
+## fuzzy-topk-reconstruction-125m.html
+
+Twenty-three verified archive entries close the train-only reconstruction
+line at 125M: three dense controls, three exact vector-logged fuzzy parents,
+fifteen short-horizon reconstruction/AuxK endpoints, and a held-out-seed hero
+pair. Six controls intentionally repeat exact run IDs from existing studies so
+the reconstruction archive and browser comparison are self-contained.
+
+The decoder reconstructs the stopped RMS-normalized MLP input from the same
+selected values and feature identities as the deployed fuzzy path.
+Reconstruction gradients reach the encoder and train-only decoder, not the
+residual input or deployed DOWN matrix. The decoder adds 72.09M optimized
+parameters, is unit-row constrained, and is discarded after training.
+
+At the three-seed short horizon, beta=1/4 is the best predeclared positive
+coefficient. It changes loss by -0.003738 nats versus fuzzy beta=0 with a 95%
+paired-t interval of [-0.024865, +0.017390], while reducing features inactive
+at both exact shared step-4600/final captures from 35.77% to 23.18%.
+Beta=1 drives aligned inactivity to 5.65% but worsens loss by +0.022288 nats,
+with an interval excluding zero. Literal residual AuxK at beta=1 is slightly
+worse on both loss and survival and is rejected. The cadence-matched definition
+matters: parent vectors were recorded every 10 steps and treatments every 100,
+so their trailing-ten-capture windows are not directly comparable.
+
+The seed-1350 long pair records 3.359723 for dense and 3.296025 for the
+selected combined arm: -1.896% relative cross-entropy and a 0.93829 perplexity
+ratio. Fresh10 macro loss changes from 3.351686 to 3.324764. There is no
+20-TPP fuzzy beta=0 control and only one seed, so neither the endpoint nor its
+late re-widening isolates a reconstruction effect. Its normalized canonical
+gain is comparable to, slightly smaller than, the short combined gain versus
+dense.
+
+The archive preserves 4.16 GB of raw feature vectors and totals about 4.60 GB.
+Its browser snapshot is 0.37 MB; its explicitly loaded expanded payload is
+5.52 MB and keeps at most 2,048 points per run-series plus 32 layer frames.
+The final
+[`ablation-reconstruction-decoder-125m.json`](../../recipes/fuzzy_topk_reconstruction/ablation-reconstruction-decoder-125m.json)
+freezes every endpoint, interval, run ID, and fidelity boundary.
 
 ## transfer-charts.html
 

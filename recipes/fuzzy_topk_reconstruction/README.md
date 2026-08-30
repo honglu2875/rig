@@ -192,6 +192,61 @@ official arms use the standard qualifying-checkpoint policy. The dependent,
 fail-closed queue is
 [`launch_v4_125m_20tpp_hero.sh`](launch_v4_125m_20tpp_hero.sh).
 
+## Sealed result
+
+The final manifest is
+[`ablation-reconstruction-decoder-125m.json`](ablation-reconstruction-decoder-125m.json).
+It freezes 23 verified runs: three dense controls, three vector-logged fuzzy
+parents, fifteen reconstruction/AuxK endpoints, and the held-out-seed hero
+pair. The short comparison is the original five-dense-TPP active-compute
+coordinate; because the sparse model stores a 16D dictionary, its literal
+stored-parameter TPP is 2.691. The same distinction makes the sparse hero
+10.765 stored-parameter TPP at a twenty-dense-TPP active-compute budget.
+
+At the short horizon, `beta_rec=0.25` was the best predeclared positive
+coefficient by three-seed mean validation loss:
+
+| arm | validation mean ± sample SD | inactive at steps 4600 and 4656 |
+|---|---:|---:|
+| dense | 3.655115 ± 0.012473 | — |
+| fuzzy parent, beta=0 | 3.585716 ± 0.005590 | 35.77% |
+| reconstruction, beta=1/64 | 3.595174 ± 0.005594 | 40.49% |
+| reconstruction, beta=1/16 | 3.589812 ± 0.010272 | 38.37% |
+| reconstruction, beta=1/4 | **3.581978 ± 0.009338** | **23.18%** |
+| reconstruction, beta=1 | 3.608004 ± 0.005959 | 5.65% |
+| beta=1 plus literal AuxK | 3.609879 ± 0.004298 | 7.20% |
+
+The incremental language-model claim is deliberately modest. Against the
+paired fuzzy parent, beta=1/4 changed validation loss by -0.003738 nats with a
+95% paired-t interval of [-0.024865, +0.017390]. It therefore preserved the
+parent's dense advantage while materially reducing aligned inactivity, but did
+not establish a quality improvement over beta=0. The tradeoff is nonlinear:
+the two smallest coefficients increased feature death, while beta=1 drove it
+down sharply at a significant +0.022288-nat cost versus the parent. Literal
+AuxK did not improve either beta=1 loss or survival and is rejected here.
+
+The survival column uses the two exact captures shared by every arm. The
+parent observer ran every 10 steps and the treatments every 100, so a
+trailing-ten-capture window would span different token ranges and is not used
+for the cross-arm claim. On the single final sampled batch, beta=1/4 changes
+inactivity from 35.78% to 23.62%, consistent with the aligned result.
+
+The held-out seed-1350 hero compared dense with the selected beta=1/4 combined
+treatment at twenty-dense-TPP deployed active compute. Canonical validation was
+3.359723 versus 3.296025: -0.063698 nats, -1.896% relative cross-entropy, or a
+0.93829 perplexity ratio. Fresh10 macro loss changed from 3.351686 to 3.324764.
+This is one seed and has no long-horizon fuzzy beta=0 control, so it supports
+the combined fuzzy-plus-reconstruction model, not an incremental
+reconstruction effect. Its normalized canonical gain is comparable to, and
+slightly smaller than, the three-seed short-horizon gain versus dense; the
+late re-widening of the probe gap is descriptive rather than evidence of a
+larger late-stage effect.
+
+The archive keeps all 4.16 GB of raw per-feature vectors. The study browser
+does not load them: its landing snapshot is 0.37 MB, and the explicit expanded
+view is 5.52 MB with at most 2,048 points per series and 32 layer frames. Raw
+logs remain the lossless source of record.
+
 ## Reproduction checks
 
 ```bash

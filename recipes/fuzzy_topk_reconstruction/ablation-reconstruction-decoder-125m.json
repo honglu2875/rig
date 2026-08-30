@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "study_id": "fuzzy-topk-reconstruction-125m",
+  "status": "sealed",
+  "sealed_at": "2026-08-30",
+  "objective": "Test whether a train-only decoder and stopped input-reconstruction target reduce fuzzy TopK feature death without sacrificing language-model quality, measure the coefficient tradeoff, test literal residual AuxK, and carry the selected positive coefficient to a held-out-seed long horizon.",
+  "archive": {
+    "dataset": "quintic/rig-logs",
+    "folder": "fuzzy-topk-reconstruction-125M",
+    "run_count": 23,
+    "records_sha256": "272677841b8b1af9188a05fe557d0bf4936f1cd2ceddb6279159157e34042282",
+    "raw_vector_bytes": 4161382460,
+    "raw_vector_policy": "Every recorded feature vector is retained. Three beta=0 controls intentionally reuse the exact cadence-10 diagnostics runs, rather than the older endpoints without vectors.",
+    "browser": {
+      "snapshot_bytes": 367162,
+      "expanded_bytes": 5523004,
+      "max_points_per_series": 2048,
+      "max_layer_snapshots": 32,
+      "raw_logs_lossless": true
+    }
+  },
+  "common_short_horizon": {
+    "accelerator": "TPU v4-32",
+    "seeds": [1337, 1338, 1339],
+    "dataset_id": "fineweb-8b-gpt2",
+    "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
+    "batch_size": 16,
+    "context": "8k",
+    "base_learning_rate": 0.00390625,
+    "comparison_coordinate": "the original 125M ladder's five-dense-TPP total deployed active matrix-FLOP budget",
+    "dense_steps": 4709,
+    "fuzzy_steps": 4656,
+    "validation_predictions": 1048576
+  },
+  "short_horizon_arms": [
+    {
+      "id": "dense",
+      "reconstruction_coefficient": null,
+      "validation_loss_by_seed": {"1337": 3.6415286660194397, "1338": 3.6577665209770203, "1339": 3.666049003601074},
+      "mean": 3.655114730199178,
+      "sample_sd": 0.012473401080956882,
+      "run_ids": [
+        "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+        "20260825T194108.904905Z-reference-gmax-ladder-125m-dense-s1338-318eab6f",
+        "20260825T201107.229311Z-reference-gmax-ladder-125m-dense-s1339-32ad584a"
+      ]
+    },
+    {
+      "id": "fuzzy-parent",
+      "reconstruction_coefficient": 0.0,
+      "validation_loss_by_seed": {"1337": 3.591915398836136, "1338": 3.581060439348221, "1339": 3.584172636270523},
+      "mean": 3.5857161581516266,
+      "sample_sd": 0.005589667362120325,
+      "final_batch_dead_fraction_mean": 0.35779475172360736,
+      "final_recent_dead_fraction_mean": 0.35761422912279767,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.3577237215909091,
+      "run_ids": [
+        "20260828T012139.584469Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1337-304a7763",
+        "20260828T014250.137281Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1338-fa728385",
+        "20260828T020358.756671Z-fuzzy_topk_autoencoder-125m-fuzzy-sparsity-c10-s1339-3cb38c79"
+      ]
+    },
+    {
+      "id": "reconstruction-beta-1of64",
+      "reconstruction_coefficient": 0.015625,
+      "validation_loss_by_seed": {"1337": 3.6007786989212036, "1338": 3.589590162038803, "1339": 3.595152497291565},
+      "mean": 3.595173786083857,
+      "sample_sd": 0.005594298821274843,
+      "final_batch_dead_fraction_mean": 0.40495683749516803,
+      "final_recent_dead_fraction_mean": 0.404569149017334,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.4048532196969697,
+      "final_reconstruction_nmse_mean": 0.3711774945259094,
+      "run_ids": [
+        "20260829T234453.797904Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of64-s1337-a076f2b4",
+        "20260830T003318.997224Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of64-s1338-da7937f9",
+        "20260830T012206.537644Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of64-s1339-797c17cf"
+      ]
+    },
+    {
+      "id": "reconstruction-beta-1of16",
+      "reconstruction_coefficient": 0.0625,
+      "validation_loss_by_seed": {"1337": 3.6015349626541138, "1338": 3.5823848247528076, "1339": 3.585515946149826},
+      "mean": 3.5898119111855826,
+      "sample_sd": 0.01027245988559176,
+      "final_batch_dead_fraction_mean": 0.38382158676783246,
+      "final_recent_dead_fraction_mean": 0.3831528127193451,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.38370620265151517,
+      "final_reconstruction_nmse_mean": 0.2762404183546702,
+      "run_ids": [
+        "20260829T232025.939627Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of16-s1337-79279e1f",
+        "20260830T000900.622471Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of16-s1338-864ee4cc",
+        "20260830T021021.054933Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of16-s1339-8a9a4ff8"
+      ]
+    },
+    {
+      "id": "reconstruction-beta-1of4",
+      "reconstruction_coefficient": 0.25,
+      "selection": "lowest three-seed mean among predeclared positive coefficients",
+      "validation_loss_by_seed": {"1337": 3.583859771490097, "1338": 3.5718426406383514, "1339": 3.5902325212955475},
+      "mean": 3.581978311141332,
+      "sample_sd": 0.00933819294239842,
+      "paired_delta_vs_fuzzy_mean": -0.003737847010294596,
+      "paired_delta_vs_fuzzy_95pct_t_ci": [-0.024865336071960693, 0.017389642051371498],
+      "paired_delta_vs_dense_mean": -0.07313641905784607,
+      "paired_delta_vs_dense_95pct_t_ci": [-0.108701525535053, -0.03757131258063915],
+      "final_batch_dead_fraction_mean": 0.2362275024255117,
+      "final_recent_dead_fraction_mean": 0.20973308384418488,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.23178267045454545,
+      "final_reconstruction_nmse_mean": 0.16408991316954294,
+      "run_ids": [
+        "20260829T225607.521375Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of4-s1337-0f6ad1ec",
+        "20260830T005749.218312Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of4-s1338-5dcbe309",
+        "20260830T014612.321602Z-fuzzy_topk_reconstruction-125m-v4-recon-beta1of4-s1339-5374058d"
+      ]
+    },
+    {
+      "id": "reconstruction-beta-1",
+      "reconstruction_coefficient": 1.0,
+      "validation_loss_by_seed": {"1337": 3.610807329416275, "1338": 3.6011607944965363, "1339": 3.6120437383651733},
+      "mean": 3.6080039540926614,
+      "sample_sd": 0.00595850666826514,
+      "paired_delta_vs_fuzzy_mean": 0.022287795941034954,
+      "paired_delta_vs_fuzzy_95pct_t_ci": [0.010182867085847744, 0.034392724796222164],
+      "final_batch_dead_fraction_mean": 0.05884528967241446,
+      "final_recent_dead_fraction_mean": 0.04842270522688826,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.05654592803030303,
+      "final_reconstruction_nmse_mean": 0.05732297773162524,
+      "run_ids": [
+        "20260829T172612.351718Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1337-8f811907",
+        "20260829T184359.087601Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1338-f934ed13",
+        "20260829T190808.764562Z-fuzzy_topk_reconstruction-125m-v4-reconstruction-full-s1339-b813960f"
+      ]
+    },
+    {
+      "id": "reconstruction-beta-1-literal-auxk",
+      "reconstruction_coefficient": 1.0,
+      "auxk_coefficient": 0.03125,
+      "validation_loss_by_seed": {"1337": 3.6134889125823975, "1338": 3.6051248013973236, "1339": 3.611022651195526},
+      "mean": 3.609878788391749,
+      "sample_sd": 0.004297779143286439,
+      "final_batch_dead_fraction_mean": 0.07451468209425609,
+      "final_recent_dead_fraction_mean": 0.06376065189639728,
+      "aligned_steps_4600_4656_dead_fraction_mean": 0.07199633049242424,
+      "final_reconstruction_nmse_mean": 0.05807928989330927,
+      "final_auxk_nmse_mean": 1.028841217358907,
+      "run_ids": [
+        "20260829T175018.919939Z-fuzzy_topk_reconstruction_auxk-125m-v4-reconstruction-auxk-full-s1337-409142f3",
+        "20260829T181709.814829Z-fuzzy_topk_reconstruction_auxk-125m-v4-reconstruction-auxk-full-s1338-565e2a29",
+        "20260829T193204.726916Z-fuzzy_topk_reconstruction_auxk-125m-v4-reconstruction-auxk-full-s1339-67d4716d"
+      ]
+    }
+  ],
+  "hero": {
+    "selection_coefficient": 0.25,
+    "seed": 1350,
+    "seed_role": "held out from coefficient selection",
+    "comparison_coordinate": "twenty-dense-TPP total deployed active matrix-FLOP budget",
+    "dense": {
+      "run_id": "20260830T102613.985314Z-reference-125m-20tpp-dense-s1350-44d48b93",
+      "validation_loss": 3.359722504019737,
+      "fresh10_macro_loss": 3.3516855239868164,
+      "tokens_per_second": 821329.2072355797
+    },
+    "treatment": {
+      "run_id": "20260830T145249.701837Z-fuzzy_topk_reconstruction-125m-20tpp-recon-beta1of4-s1350-21d6d912",
+      "validation_loss": 3.2960245966911317,
+      "fresh10_macro_loss": 3.3247641563415526,
+      "tokens_per_second": 485560.8809375938,
+      "final_batch_dead_fraction": 0.09129972010850906
+    },
+    "canonical_delta": -0.06369790732860547,
+    "canonical_relative_cross_entropy": -0.01895927632487331,
+    "canonical_perplexity_ratio": 0.9382884067722892,
+    "fresh10_macro_delta": -0.02692136764526376,
+    "evidence_boundary": "One paired held-out seed. There is no 20-TPP fuzzy beta=0 arm, so this establishes only a combined fuzzy-plus-reconstruction result against dense, not an incremental reconstruction effect or a long-horizon confidence interval."
+  },
+  "decision": {
+    "selected_positive_coefficient": 0.25,
+    "literal_auxk": "rejected; it did not improve beta=1 validation or feature survival",
+    "reconstruction": "promising mechanism tradeoff, not a proven language-model improvement over the fuzzy parent",
+    "survival_comparison": "Feature inactivity is compared on the two exact captures shared by every short-horizon fuzzy arm, steps 4600 and 4656. A trailing-ten-capture statistic is retained per run but is not contrasted because parent cadence is 10 and treatment cadence is 100.",
+    "main_finding": "beta=0.25 preserved the fuzzy parent's dense advantage while reducing features inactive at both aligned final captures from 35.77% to 23.18%; the paired validation delta versus beta=0 was small and unresolved. Beta=1 reduced aligned inactivity to 5.65% but significantly worsened loss versus beta=0.",
+    "hero_interpretation": "The combined treatment beat dense at the long endpoint, but its normalized canonical gain was comparable to, not larger than, the short-horizon three-seed gain. The observed late re-widening is descriptive because the hero has one seed and no long fuzzy parent."
+  }
+}

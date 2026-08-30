@@ -13,6 +13,7 @@ import base64
 import csv
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import errno
 import gzip
 import hashlib
 import json
@@ -2381,6 +2382,9 @@ def export_study(
                     try:
                         os.link(source, destination_path)
                     except OSError as error:
+                        if error.errno == errno.EXDEV:
+                            shutil.copy2(source, destination_path)
+                            continue
                         raise ReportError(
                             f"could not hard-link immutable artifact {source} to "
                             f"{destination_path}: {error}"

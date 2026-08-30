@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import gzip
 import hashlib
 import json
@@ -9,6 +10,7 @@ from typing import Sequence
 import re
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -896,6 +898,29 @@ class StudyExportTests(unittest.TestCase):
             FUZZY_SPARSITY_LOSSY_LOG_NAME,
             payload["runs"][0]["riglogs"],
         )
+
+    def test_link_export_copies_across_filesystems(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            source = sorted(path for path in runs.iterdir() if path.is_dir())[0]
+            expected = (source / TRAINING_LOG_NAME).read_bytes()
+
+            with mock.patch(
+                "rig.report.os.link", side_effect=OSError(errno.EXDEV, "cross-device")
+            ):
+                summary = export_study(
+                    runs,
+                    root / "out",
+                    "demo",
+                    link_artifacts=True,
+                )
+            folders = sorted(
+                path for path in summary["path"].iterdir() if path.is_dir()
+            )
+            observed = (folders[0] / TRAINING_LOG_NAME).read_bytes()
+
+        self.assertEqual(observed, expected)
 
     def test_a_routed_run_does_not_overwrite_the_dense_run_beside_it(self) -> None:
         """Routing is not one of the coordinates the name is built from.

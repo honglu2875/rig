@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Train-only reconstruction for fuzzy TopK · 125M</title>
+<meta name="description" content="A 23-run study of train-only reconstruction, literal AuxK, feature survival, and a 20-TPP fuzzy TopK hero pair.">
+<style>
+:root{--ink:#18211f;--muted:#69736f;--paper:#f5f4ee;--card:#fffdf8;--line:#d9d7cc;--green:#18765e;--blue:#356ea8;--red:#b44646;--gold:#b17a21;--violet:#795ba7}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 88% -5%,#dcebe6 0,transparent 34rem),var(--paper);color:var(--ink);font:15px/1.62 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:min(1130px,calc(100% - 32px));margin:auto;padding:48px 0 70px}.eyebrow{margin:0 0 9px;color:var(--green);font-size:12px;font-weight:800;letter-spacing:.15em;text-transform:uppercase}h1{max-width:930px;margin:0;font:700 clamp(40px,7vw,78px)/.98 ui-serif,Georgia,serif;letter-spacing:-.05em}.lede{max-width:850px;margin:22px 0 0;color:#47524e;font-size:19px}.verdict{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:30px 0 45px}.verdict article,.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:21px}.verdict strong{display:block;margin:8px 0 6px;font-size:20px}.tag{display:inline-block;border-radius:99px;padding:4px 9px;background:#dfeee8;color:#17624f;font-size:10px;font-weight:850;letter-spacing:.09em;text-transform:uppercase}.tag.warn{background:#f3e8d0;color:#875b16}.tag.no{background:#f2dddd;color:#913434}section{margin-top:52px}.section-head{display:grid;grid-template-columns:1fr minmax(280px,430px);gap:24px;align-items:end;margin-bottom:16px}.section-head h2{margin:0;font:700 35px/1.08 ui-serif,Georgia,serif;letter-spacing:-.025em}.section-head p{margin:0;color:var(--muted)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.chart{overflow:auto}.chart svg{display:block;width:100%;min-width:620px;height:auto}.axis{stroke:#d7d3c9;stroke-width:1}.zero{stroke:#8c9691;stroke-width:1.4;stroke-dasharray:5 5}.tick{fill:var(--muted);font-size:12px}.quality{fill:none;stroke:var(--blue);stroke-width:3}.dead{fill:none;stroke:var(--red);stroke-width:3}.hero-line{fill:none;stroke:var(--violet);stroke-width:3}.dot-q{fill:var(--blue)}.dot-d{fill:var(--red)}table{width:100%;border-collapse:collapse;font-size:13.5px;white-space:nowrap}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}th{color:var(--muted);font-size:10px;letter-spacing:.065em;text-transform:uppercase}th:first-child,td:first-child{text-align:left}tr:last-child td{border-bottom:0}.good{color:var(--green);font-weight:800}.bad{color:var(--red);font-weight:800}.metric{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--line)}.metric:last-child{border-bottom:0}.metric strong{font-variant-numeric:tabular-nums}.metric small{grid-column:1/-1;color:var(--muted)}.notes{columns:2;column-gap:34px}.notes p{break-inside:avoid;margin-top:0}code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}.callout{margin-top:15px;padding:18px 21px;border:1px solid #d4bc89;border-radius:14px;background:#f3e6c9}.links{display:flex;flex-wrap:wrap;gap:9px;margin-top:28px}.links a{padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--green);text-decoration:none}.footer{margin-top:58px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}@media(max-width:800px){main{padding-top:30px}.verdict,.grid,.section-head{grid-template-columns:1fr}.notes{columns:1}.section-head{align-items:start}}
+</style>
+</head>
+<body><main>
+<p class="eyebrow">Fuzzy TopK · 125M · 23 verified runs · TPU v4-32</p>
+<h1>Reconstruction revives features.<br>The coefficient pays the bill.</h1>
+<p class="lede">A discarded training-only decoder can keep far more of a 16D fuzzy dictionary active, but the effect is nonlinear and eventually trades against language-model loss. The useful result is a frontier: β=¼ preserves the fuzzy model's quality while cutting cadence-matched persistent inactivity by 35%. Literal residual AuxK adds nothing.</p>
+
+<div class="verdict">
+<article><span class="tag">Promising tradeoff</span><strong>β=¼</strong><span>23.18% inactive at both shared final captures versus 35.77% for the fuzzy parent; paired loss Δ −0.00374 nats, with an interval spanning zero.</span></article>
+<article><span class="tag warn">Mechanism, not free gain</span><strong>β=1</strong><span>Only 5.65% inactive at both captures, but +0.02229 nats versus the parent. Strong reconstruction clearly changes utilization.</span></article>
+<article><span class="tag no">Rejected addition</span><strong>Literal AuxK</strong><span>At β=1 it raises aligned inactivity to 7.20% and mean loss to 3.609879. It does not advance.</span></article>
+</div>
+
+<section>
+<div class="section-head"><h2>The dose response is a frontier, not a monotone win.</h2><p>Three paired seeds at the original five-dense-TPP deployed active-compute coordinate. Error statements use same-seed loss differences; survival means zero positive activation at both exact shared captures, steps 4,600 and 4,656.</p></div>
+<div class="grid">
+<article class="card chart">
+<svg viewBox="0 0 900 380" role="img" aria-label="Validation loss delta versus fuzzy parent by reconstruction coefficient">
+<line class="axis" x1="75" y1="325" x2="860" y2="325"/><line class="axis" x1="75" y1="55" x2="75" y2="325"/><line class="zero" x1="75" y1="257.5" x2="860" y2="257.5"/>
+<line class="axis" x1="75" y1="190" x2="860" y2="190"/><line class="axis" x1="75" y1="122.5" x2="860" y2="122.5"/><line class="axis" x1="75" y1="55" x2="860" y2="55"/>
+<text class="tick" x="63" y="329" text-anchor="end">−0.01</text><text class="tick" x="63" y="262" text-anchor="end">0</text><text class="tick" x="63" y="194" text-anchor="end">+0.01</text><text class="tick" x="63" y="127" text-anchor="end">+0.02</text><text class="tick" x="63" y="59" text-anchor="end">+0.03</text>
+<text class="tick" x="110" y="350" text-anchor="middle">β=0</text><text class="tick" x="250" y="350" text-anchor="middle">1/64</text><text class="tick" x="390" y="350" text-anchor="middle">1/16</text><text class="tick" x="530" y="350" text-anchor="middle">1/4</text><text class="tick" x="670" y="350" text-anchor="middle">1</text><text class="tick" x="810" y="350" text-anchor="middle">1 + AuxK</text>
+<path class="quality" d="M110 257.5 L250 193.7 L390 229.9 L530 282.7 L670 107.0 L810 94.4"/>
+<circle class="dot-q" cx="110" cy="257.5" r="5"/><circle class="dot-q" cx="250" cy="193.7" r="5"/><circle class="dot-q" cx="390" cy="229.9" r="5"/><circle class="dot-q" cx="530" cy="282.7" r="6"/><circle class="dot-q" cx="670" cy="107" r="5"/><circle class="dot-q" cx="810" cy="94.4" r="5"/>
+<text class="tick" x="450" y="26" text-anchor="middle">validation-loss Δ versus fuzzy β=0 · lower is better</text>
+</svg>
+</article>
+<article class="card chart">
+<svg viewBox="0 0 900 380" role="img" aria-label="Feature fraction inactive at both final aligned captures by reconstruction coefficient">
+<line class="axis" x1="75" y1="325" x2="860" y2="325"/><line class="axis" x1="75" y1="55" x2="75" y2="325"/><line class="axis" x1="75" y1="265" x2="860" y2="265"/><line class="axis" x1="75" y1="205" x2="860" y2="205"/><line class="axis" x1="75" y1="145" x2="860" y2="145"/><line class="axis" x1="75" y1="85" x2="860" y2="85"/>
+<text class="tick" x="63" y="329" text-anchor="end">0%</text><text class="tick" x="63" y="269" text-anchor="end">10%</text><text class="tick" x="63" y="209" text-anchor="end">20%</text><text class="tick" x="63" y="149" text-anchor="end">30%</text><text class="tick" x="63" y="89" text-anchor="end">40%</text>
+<text class="tick" x="110" y="350" text-anchor="middle">β=0</text><text class="tick" x="250" y="350" text-anchor="middle">1/64</text><text class="tick" x="390" y="350" text-anchor="middle">1/16</text><text class="tick" x="530" y="350" text-anchor="middle">1/4</text><text class="tick" x="670" y="350" text-anchor="middle">1</text><text class="tick" x="810" y="350" text-anchor="middle">1 + AuxK</text>
+<path class="dead" d="M110 110.4 L250 82.1 L390 94.8 L530 185.9 L670 291.1 L810 281.8"/>
+<circle class="dot-d" cx="110" cy="110.4" r="5"/><circle class="dot-d" cx="250" cy="82.1" r="5"/><circle class="dot-d" cx="390" cy="94.8" r="5"/><circle class="dot-d" cx="530" cy="185.9" r="6"/><circle class="dot-d" cx="670" cy="291.1" r="5"/><circle class="dot-d" cx="810" cy="281.8" r="5"/>
+<text class="tick" x="450" y="26" text-anchor="middle">features inactive at both steps 4,600 and 4,656 · lower is better</text>
+</svg>
+</article>
+</div>
+<div class="callout"><strong>The two weak doses are not intermediate mechanistically.</strong> β=1/64 and β=1/16 finish with 40.49% and 38.37% aligned inactivity—worse than β=0. The decoder's private Adam state also means scaling its raw gradient does not linearly scale its update. The measured frontier should not be interpolated as if β were a simple regularization temperature.</div>
+</section>
+
+<section>
+<div class="section-head"><h2>β=¼ retains the fuzzy gain; it does not prove a new one.</h2><p>Exact endpoint losses. The key contrast for reconstruction is against fuzzy β=0, not merely against dense.</p></div>
+<article class="card"><table>
+<thead><tr><th>arm</th><th>validation mean</th><th>sample SD</th><th>paired Δ vs fuzzy</th><th>95% paired-t interval</th><th>aligned inactive</th><th>tokens/s</th></tr></thead>
+<tbody>
+<tr><td>dense GELU</td><td>3.655115</td><td>0.012473</td><td>—</td><td>—</td><td>—</td><td>817,618</td></tr>
+<tr><td>fuzzy β=0</td><td>3.585716</td><td>0.005590</td><td>reference</td><td>—</td><td>35.77%</td><td>562,406</td></tr>
+<tr><td>reconstruction β=1/64</td><td>3.595174</td><td>0.005594</td><td>+0.009458</td><td>[+0.006157, +0.012759]</td><td>40.49%</td><td>483,753</td></tr>
+<tr><td>reconstruction β=1/16</td><td>3.589812</td><td>0.010272</td><td>+0.004096</td><td>[−0.007788, +0.015979]</td><td>38.37%</td><td>483,701</td></tr>
+<tr><td><strong>reconstruction β=1/4</strong></td><td class="good">3.581978</td><td>0.009338</td><td class="good">−0.003738</td><td>[−0.024865, +0.017390]</td><td class="good">23.18%</td><td>483,858</td></tr>
+<tr><td>reconstruction β=1</td><td>3.608004</td><td>0.005959</td><td class="bad">+0.022288</td><td>[+0.010183, +0.034393]</td><td>5.65%</td><td>483,759</td></tr>
+<tr><td>β=1 + literal AuxK</td><td>3.609879</td><td>0.004298</td><td class="bad">+0.024163</td><td>[+0.017605, +0.030720]</td><td>7.20%</td><td>434,390</td></tr>
+</tbody></table></article>
+<p>The selected β=¼ arm is −0.073136 nats versus dense, a −2.001% relative cross-entropy change and a 0.92947 perplexity ratio. But fuzzy β=0 already contributes −0.069399 nats. The incremental β=¼ interval spans zero; the defensible conclusion is preserved quality plus better utilization.</p>
+<p>The parent vectors were captured every 10 steps and treatment vectors every 100. A “last ten captures” browser curve therefore spans different token ranges and is useful within a run, not as the headline cross-arm statistic. The table uses the exact shared step-4,600 and final-step-4,656 batches; final single-batch inactivity independently changes from 35.78% to 23.62% at β=¼.</p>
+</section>
+
+<section>
+<div class="section-head"><h2>The long run has a late second crossing, but no late-effect control.</h2><p>Held-out seed 1350, validation probes every 500 steps. The curve is the percent cross-entropy difference between the combined fuzzy+β¼ treatment and dense at each aligned probe; below zero favors treatment.</p></div>
+<article class="card chart">
+<svg viewBox="0 0 900 390" role="img" aria-label="Relative validation-loss delta for the 20-TPP hero pair over training">
+<line class="axis" x1="80" y1="330" x2="840" y2="330"/><line class="axis" x1="80" y1="70" x2="80" y2="330"/><line class="zero" x1="80" y1="110" x2="840" y2="110"/>
+<line class="axis" x1="80" y1="190" x2="840" y2="190"/><line class="axis" x1="80" y1="270" x2="840" y2="270"/>
+<text class="tick" x="68" y="74" text-anchor="end">+1%</text><text class="tick" x="68" y="114" text-anchor="end">0%</text><text class="tick" x="68" y="194" text-anchor="end">−2%</text><text class="tick" x="68" y="274" text-anchor="end">−4%</text><text class="tick" x="68" y="330" text-anchor="end">−5.5%</text>
+<text class="tick" x="80" y="354" text-anchor="middle">0.07B</text><text class="tick" x="270" y="354" text-anchor="middle">0.66B</text><text class="tick" x="460" y="354" text-anchor="middle">1.25B</text><text class="tick" x="650" y="354" text-anchor="middle">1.84B</text><text class="tick" x="840" y="354" text-anchor="middle">2.42B tokens</text>
+<polyline class="hero-line" points="80.0,314.3 101.1,216.8 122.2,185.8 143.3,150.4 164.4,141.4 185.6,134.1 206.7,124.4 227.8,114.3 248.9,110.8 270.0,103.6 291.1,98.3 312.2,103.9 333.3,95.5 354.4,102.1 375.6,94.9 396.7,101.0 417.8,99.6 438.9,98.5 460.0,106.2 481.1,106.9 502.2,110.8 523.3,111.3 544.4,120.5 565.6,123.7 586.7,129.6 607.8,137.7 628.9,141.5 650.0,148.0 671.1,154.0 692.2,159.5 713.3,165.4 734.4,172.7 755.6,180.2 776.7,183.0 797.8,188.5 818.9,188.9 840.0,191.7"/>
+<text class="tick" x="450" y="28" text-anchor="middle">100 × (treatment − dense) / dense validation cross-entropy</text>
+</svg>
+</article>
+<div class="grid" style="margin-top:14px">
+<article class="card"><div class="metric"><span>Canonical FineWeb</span><strong class="good">−0.063698 nats</strong><small>3.359723 → 3.296025; −1.896% relative CE; perplexity ratio 0.93829.</small></div><div class="metric"><span>Fresh10 macro</span><strong class="good">−0.026921 nats</strong><small>3.351686 → 3.324764; a smaller out-of-domain gain.</small></div></article>
+<article class="card"><div class="metric"><span>Short β¼ vs dense</span><strong>−2.001% relative CE</strong><small>Three paired seeds; 95% absolute-delta interval excludes zero.</small></div><div class="metric"><span>Long combined arm vs dense</span><strong>−1.896% relative CE</strong><small>One seed; no confidence interval and no long fuzzy β=0 arm.</small></div></article>
+</div>
+<p>The probes show a large early transient advantage, a near-zero/slightly adverse middle, a second crossing near 1.38B tokens, and a widening late advantage. That shape is descriptive. The normalized endpoint gain is comparable to, slightly smaller than, the short-horizon combined gain—not evidence that reconstruction becomes significantly better late in training.</p>
+</section>
+
+<section>
+<div class="section-head"><h2>What the intervention and archive contain</h2><p>The deployed path never reads the auxiliary decoder. The archive separates lossless evidence from browser-friendly reductions.</p></div>
+<div class="card notes">
+<p><strong>Gradient contract.</strong> Selected hidden values and identities decode the stopped RMS-normalized MLP input through a separate unit-row matrix. Reconstruction gradients reach <code>W_up</code>, <code>b_up</code>, and the train-only decoder; they are blocked from the residual input and deployed <code>W_down</code>. The decoder is stripped from deployment checkpoints.</p>
+<p><strong>Compute contract.</strong> All short sparse arms use 226.75M deployment parameters and 72.09M train-only parameters. Reconstruction raises physical MLP matrix work from <code>12MDH</code> to <code>18MDH</code>; literal AuxK raises it to <code>19MDH</code>. Active deployed compute, not wall time or optimized parameter count, is the ladder coordinate.</p>
+<p><strong>Raw evidence.</strong> Nineteen runs retain <code>fuzzy_sparsity.rigvec</code>, totaling 4.16 GB. Parent controls record at cadence 10; treatments record at cadence 100. Every recorded layer × feature vector is preserved. The complete 23-run study payload is about 4.60 GB.</p>
+<p><strong>Browser policy.</strong> The landing snapshot is 0.37 MB. The explicitly loaded expanded report is 5.52 MB, bounded to 2,048 points per run-series and 32 layer frames. Its neuron explorer uses a widening-step lossy companion. Raw <code>.riglog</code> and <code>.rigvec</code> files remain authoritative.</p>
+<p><strong>AuxK boundary.</strong> Literal AuxK reconstructs the stopped residual error using selected dead features after 10M inactive tokens. Its β=1 three-seed result is negative. This rejects the tested coefficient/selector, not every possible dead-feature auxiliary target.</p>
+<p><strong>Evidence boundary.</strong> All short claims are 125M on one v4-32 topology. The hero is one held-out seed. There is no 20-TPP fuzzy-only control, so neither the late curve nor the endpoint isolates reconstruction from the already-strong fuzzy architecture.</p>
+</div>
+</section>
+
+<div class="links">
+<a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-reconstruction-125M">raw archive ↗</a>
+<a href="study-browser.html">interactive study browser →</a>
+<a href="../../recipes/fuzzy_topk_reconstruction/README.md">implementation contract →</a>
+</div>
+<div class="footer">Sealed 30 August 2026. All 23 archived runs pass <span class="mono">rig verify</span>. Exact run IDs, endpoint values, paired intervals, hashes, and the browser fidelity policy are frozen in <span class="mono">ablation-reconstruction-decoder-125m.json</span>. This page is static inline HTML/SVG with system fonts and no runtime fetch.</div>
+</main></body></html>
