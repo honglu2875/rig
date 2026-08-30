@@ -613,6 +613,12 @@ class HarnessRunTests(unittest.TestCase):
         self.assertFalse(outcome.record["qualified"])
         self.assertIsNone(outcome.checkpoint_path)
         self.assertFalse(outcome.record["checkpoint"]["retained"])
+        validated = verify_run(
+            outcome.run_dir,
+            require_checkpoint=False,
+            allow_missing_checkpoint=True,
+        )
+        self.assertIsNone(validated.checkpoint_path)
 
     def test_research_run_can_explicitly_omit_checkpoint_and_be_reverified(
         self,

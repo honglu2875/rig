@@ -304,6 +304,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="folder name for --study-export-target; required with it",
     )
+    report.add_argument(
+        "--study-full-max-points",
+        type=nonnegative_int,
+        default=0,
+        help=(
+            "points retained per run/series in the expanded study-browser "
+            "payload; 0 keeps every sample"
+        ),
+    )
+    report.add_argument(
+        "--study-full-layer-snapshots",
+        type=nonnegative_int,
+        default=0,
+        help=(
+            "step frames retained per layer chart in the expanded "
+            "study-browser payload; 0 keeps every frame"
+        ),
+    )
+    report.add_argument(
+        "--study-lossy-fuzzy",
+        action="store_true",
+        help=(
+            "add the exact widening-step fuzzy vector companion used by the "
+            "study-browser explorer"
+        ),
+    )
     report.add_argument("--select", help="regular expression matched against run IDs")
 
     clone = commands.add_parser(

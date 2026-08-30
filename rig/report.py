@@ -2198,6 +2198,51 @@ def _study_run_name(
             f"-{sparse_labels[sparse_activation]}-h{compact_hidden}d"
             f"{input_width}-k{compact_active}d-l{layers}"
         )
+    reconstruction_label = ""
+    reconstruction = (result.get("implementation") or {}).get("reconstruction")
+    if reconstruction is not None:
+        if not isinstance(reconstruction, Mapping):
+            return ""
+        coefficient = reconstruction.get("coefficient")
+        if (
+            isinstance(coefficient, bool)
+            or not isinstance(coefficient, (int, float))
+            or not math.isfinite(coefficient)
+            or coefficient < 0
+        ):
+            return ""
+        compact_coefficient = format(coefficient, ".12g").replace(".", "p")
+        reconstruction_label = f"-recon-b{compact_coefficient}"
+        auxk = reconstruction.get("auxk")
+        if auxk is not None:
+            if not isinstance(auxk, Mapping):
+                return ""
+            mode = auxk.get("mode")
+            if mode not in {"none", "auxk"}:
+                return ""
+            if mode == "auxk":
+                aux_coefficient = auxk.get("coefficient")
+                width_ratio = auxk.get("width_ratio")
+                dead_tokens = auxk.get("dead_tokens_threshold")
+                if (
+                    isinstance(aux_coefficient, bool)
+                    or not isinstance(aux_coefficient, (int, float))
+                    or not math.isfinite(aux_coefficient)
+                    or aux_coefficient < 0
+                    or isinstance(width_ratio, bool)
+                    or not isinstance(width_ratio, (int, float))
+                    or not math.isfinite(width_ratio)
+                    or width_ratio <= 0
+                    or isinstance(dead_tokens, bool)
+                    or not isinstance(dead_tokens, int)
+                    or dead_tokens <= 0
+                ):
+                    return ""
+                compact_aux = format(aux_coefficient, ".12g").replace(".", "p")
+                compact_width = format(width_ratio, ".12g").replace(".", "p")
+                reconstruction_label += (
+                    f"-auxk-b{compact_aux}-k{compact_width}d-dead{dead_tokens}t"
+                )
     duration = (
         "-duration" if model.get("parameterization") == "completedp_duration_v1" else ""
     )
@@ -2241,7 +2286,8 @@ def _study_run_name(
             return ""
         local_moe = f"-local-k{local_steps}"
     return (
-        f"{tier}{routed}{sparse_mlp}{duration}{local_moe}{load_scaling}{decay}"
+        f"{tier}{routed}{sparse_mlp}{reconstruction_label}{duration}{local_moe}"
+        f"{load_scaling}{decay}"
         f"-{tpp}tpp-bs{batch}-lr2e{exponent}"
         f"-s{result.get('seed')}"
     )
@@ -2255,13 +2301,17 @@ def export_study(
     select: str | None = None,
     link_artifacts: bool = False,
     lossy_fuzzy: bool = False,
+    full_max_points: int = 0,
+    full_layer_snapshots: int = 0,
 ) -> dict[str, Any]:
     """Lay a study out the way the dataset repository expects it.
 
     One folder per run under ``<target>/<study>/``, named for what varies
     rather than for a timestamp, plus the ledger and the two report payloads
-    consumed by the study browser: a compact curves-only snapshot and a full
-    view containing every recorded sample.
+    consumed by the study browser: a compact curves-only snapshot and an
+    expanded view. The expanded view contains every recorded sample by default;
+    callers may explicitly bound it while retaining the raw logs as the archive
+    of record.
 
     The README is written empty on purpose. Nothing here can infer why a sweep
     was run or what it showed, and a plausible-looking generated description
@@ -2364,8 +2414,8 @@ def export_study(
             build_report(
                 destination,
                 full_page,
-                max_chart_points=0,
-                layer_snapshots=0,
+                max_chart_points=full_max_points,
+                layer_snapshots=full_layer_snapshots,
             )
             full_blob = _embedded_report_blob(full_page)
             (destination / "full.json.gz").write_bytes(full_blob)
@@ -2398,6 +2448,8 @@ def export_study(
         "snapshot_bytes": snapshot_bytes,
         "full_bytes": full_bytes,
         "lossy_bytes": lossy_bytes,
+        "full_max_points": full_max_points,
+        "full_layer_snapshots": full_layer_snapshots,
         "readme": destination / "README.md",
     }
 
@@ -2778,9 +2830,14 @@ function chooseStudy(remote){
      detail.innerHTML='<div class="study-doc">'+card+'</div>'
       +'<div class="study-actions"><button class="study-go" id="study-go">Open overview</button>'
       +'<a class="study-action" href="'+esc(browse)+'" target="_blank" rel="noopener">Browse raw logs</a>'
-      +(study.full?'<button class="study-action" id="study-full">Load full report ('
-        +mb(study.full)+')</button><span class="study-warn">Loads a '+mb(study.full)
-        +' report payload from Hugging Face. Nothing is fetched until you click.</span>':'')
+      +(study.full?(study.fullMaxPoints
+        ?'<button class="study-action" id="study-full">Load expanded report (≤'
+          +esc(study.fullMaxPoints)+' points per series, '+mb(study.full)
+          +')</button><span class="study-warn">Loads a '+mb(study.full)
+          +' bounded report payload; raw logs retain every sample. Nothing is fetched until you click.</span>'
+        :'<button class="study-action" id="study-full">Load full report ('+mb(study.full)
+          +')</button><span class="study-warn">Loads a '+mb(study.full)
+          +' report payload. Nothing is fetched until you click.</span>'):'')
       +'</div><div class="study-status" id="study-progress"></div>';
      detail.querySelector('#study-go').onclick=()=>{cameFromPicker=true;root.remove();resolve(withStudySource(payload,remote,study))};
      const fullButton=detail.querySelector('#study-full');

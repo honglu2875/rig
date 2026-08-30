@@ -962,6 +962,7 @@ def command_verify(args: argparse.Namespace) -> int:
         str(record["profile"]) if record is not None else config.default_profile
     )
     require_checkpoint = _record_requires_checkpoint(record)
+    allow_missing_checkpoint = _record_allows_missing_checkpoint(record)
     expected_downstream = (
         _recorded_downstream_tokens(record)
         if profile == "official" and record is not None
@@ -980,6 +981,7 @@ def command_verify(args: argparse.Namespace) -> int:
         expected_validation_tokens=expected_validation,
         expected_downstream_tokens=expected_downstream,
         require_checkpoint=require_checkpoint,
+        allow_missing_checkpoint=allow_missing_checkpoint,
     )
     if record is not None:
         stdout_sha256 = sha256_file(run_dir / "stdout.log")
@@ -1253,7 +1255,15 @@ def command_report(args: argparse.Namespace) -> int:
             if args.study_export_target.is_absolute()
             else root / args.study_export_target
         )
-        summary = export_study(runs, target, args.study_name, select=args.select)
+        summary = export_study(
+            runs,
+            target,
+            args.study_name,
+            select=args.select,
+            lossy_fuzzy=args.study_lossy_fuzzy,
+            full_max_points=args.study_full_max_points,
+            full_layer_snapshots=args.study_full_layer_snapshots,
+        )
         print(
             f"study {summary['path']}: {summary['runs']} run(s), "
             f"{summary['ledgered']} ledgered, {summary['bytes'] / 1e6:.1f} MB "
@@ -2071,6 +2081,22 @@ def _record_requires_checkpoint(record: dict[str, Any] | None) -> bool:
     if not isinstance(retained, bool):
         raise HarnessError("recorded checkpoint retention state is invalid")
     return retained
+
+
+def _record_allows_missing_checkpoint(record: dict[str, Any] | None) -> bool:
+    """Recover whether the harness deliberately removed a declared checkpoint."""
+
+    if record is None:
+        return False
+    checkpoint = record.get("checkpoint")
+    if checkpoint is None:
+        return False
+    if not isinstance(checkpoint, dict):
+        raise HarnessError("recorded checkpoint metadata is invalid")
+    retained = checkpoint.get("retained", True)
+    if not isinstance(retained, bool):
+        raise HarnessError("recorded checkpoint retention state is invalid")
+    return not retained
 
 
 def _ensure_artifacts_inside_repo(path: Path, root: Path) -> None:

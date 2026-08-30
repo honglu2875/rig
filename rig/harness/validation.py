@@ -73,8 +73,8 @@ def _plain_object(value: Any, name: str) -> Mapping[str, Any]:
     return value
 
 
-def contained_file(run_dir: Path, relative: Any) -> Path:
-    """Resolve a result artifact without permitting absolute paths or escapes."""
+def _contained_candidate(run_dir: Path, relative: Any) -> tuple[Path, Path, Path]:
+    """Resolve a declared artifact path without requiring the leaf to exist."""
 
     if not isinstance(relative, str) or not relative.strip():
         raise ResultValidationError("checkpoint must be a non-empty relative path")
@@ -92,17 +92,36 @@ def contained_file(run_dir: Path, relative: Any) -> Path:
         raise ResultValidationError(
             "checkpoint path escapes the run directory"
         ) from exc
+    return root, unresolved, resolved
+
+
+def _contained_file(
+    run_dir: Path, relative: Any, *, allow_missing: bool = False
+) -> Path | None:
+    """Resolve a contained file, optionally accepting a deliberately absent leaf."""
+
+    _, unresolved, resolved = _contained_candidate(run_dir, relative)
     if not resolved.is_file():
+        if allow_missing and not unresolved.exists() and not unresolved.is_symlink():
+            return None
         raise ResultValidationError("checkpoint is not a regular file")
     if unresolved.is_symlink():
         raise ResultValidationError("checkpoint may not be a symbolic link")
     # A symlink in a parent is caught by the resolved containment check. Reject a
     # changed target between resolution and hashing as well as practical stdlib can.
     try:
-        if not os.path.samefile(resolved, root / candidate):
+        if not os.path.samefile(resolved, unresolved):
             raise ResultValidationError("checkpoint changed while being validated")
     except OSError as exc:
         raise ResultValidationError("checkpoint could not be inspected") from exc
+    return resolved
+
+
+def contained_file(run_dir: Path, relative: Any) -> Path:
+    """Resolve a result artifact without permitting absolute paths or escapes."""
+
+    resolved = _contained_file(run_dir, relative)
+    assert resolved is not None
     return resolved
 
 
@@ -306,6 +325,7 @@ def validate_result(
     expected_validation_tokens: int | None = None,
     expected_downstream_tokens: Mapping[str, int] | None = None,
     require_checkpoint: bool = True,
+    allow_missing_checkpoint: bool = False,
 ) -> ValidationResult:
     """Validate a trainer result and, optionally, independently evaluate it."""
 
@@ -364,7 +384,11 @@ def validate_result(
             raise ResultValidationError("checkpoint is required for this run")
         checkpoint = None
     else:
-        checkpoint = contained_file(run_dir, declared_checkpoint)
+        checkpoint = _contained_file(
+            run_dir,
+            declared_checkpoint,
+            allow_missing=allow_missing_checkpoint,
+        )
     artifact_paths: dict[str, Path] = {}
     artifacts = payload.get("artifacts", {})
     if not isinstance(artifacts, dict):
@@ -405,6 +429,7 @@ def verify_run(
     expected_validation_tokens: int | None = None,
     expected_downstream_tokens: Mapping[str, int] | None = None,
     require_checkpoint: bool = True,
+    allow_missing_checkpoint: bool = False,
 ) -> ValidationResult:
     """Re-validate an existing run from its captured stdout log."""
 
@@ -421,4 +446,5 @@ def verify_run(
         expected_validation_tokens=expected_validation_tokens,
         expected_downstream_tokens=expected_downstream_tokens,
         require_checkpoint=require_checkpoint,
+        allow_missing_checkpoint=allow_missing_checkpoint,
     )

@@ -1013,6 +1013,58 @@ class StudyExportTests(unittest.TestCase):
             ],
         )
 
+    def test_reconstruction_coordinates_are_archive_coordinates(self) -> None:
+        """Reconstruction dose and literal AuxK cannot collide in an export."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = self._runs(root)
+            treatments = (
+                {
+                    "coefficient": 0.25,
+                    "auxk": {"mode": "none"},
+                },
+                {
+                    "coefficient": 1.0,
+                    "auxk": {
+                        "mode": "auxk",
+                        "coefficient": 0.03125,
+                        "width_ratio": 0.5,
+                        "dead_tokens_threshold": 10_000_000,
+                    },
+                },
+            )
+            for run, treatment in zip(
+                sorted(p for p in runs.iterdir() if p.is_dir()),
+                treatments,
+                strict=True,
+            ):
+                payload = json.loads((run / "result.json").read_text(encoding="utf-8"))
+                payload["seed"] = 1350
+                payload["contract"]["model"] = {
+                    "d_model": 16,
+                    "layers": 11,
+                    "mlp_activation": "fuzzy_topk_relu",
+                    "mlp_mult": 16,
+                    "mlp_top_k": 64,
+                }
+                payload["implementation"] = {"reconstruction": treatment}
+                (run / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            summary = export_study(runs, root / "out", "demo")
+            folders = sorted(p.name for p in summary["path"].iterdir() if p.is_dir())
+
+        self.assertEqual(
+            folders,
+            [
+                "60m-fuzzy-h16d-k4d-l11-recon-b0p25-5tpp-bs1-lr2e-8-s1350",
+                (
+                    "60m-fuzzy-h16d-k4d-l11-recon-b1-auxk-b0p03125-k0p5d-"
+                    "dead10000000t-5tpp-bs1-lr2e-8-s1350"
+                ),
+            ],
+        )
+
     def test_a_duration_run_does_not_overwrite_the_reference_run_beside_it(
         self,
     ) -> None:
@@ -1202,6 +1254,24 @@ class StudyExportTests(unittest.TestCase):
         self.assertEqual(snapshot["diagnosticCharts"], [])
         self.assertEqual(snapshot["layerCharts"], [])
         self.assertTrue(snapshot["timeCharts"])
+
+    def test_expanded_browser_view_can_be_explicitly_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            summary = export_study(
+                self._runs(root),
+                root / "out",
+                "demo",
+                full_max_points=32,
+                full_layer_snapshots=2,
+            )
+            payload = json.loads(
+                gzip.decompress((summary["path"] / "full.json.gz").read_bytes())
+            )
+
+        self.assertEqual(payload["meta"]["maxChartPoints"], 32)
+        self.assertEqual(summary["full_max_points"], 32)
+        self.assertEqual(summary["full_layer_snapshots"], 2)
 
     def test_exported_folder_mapping_remains_ledgered(self) -> None:
         """Canonical archive folders retain the immutable source run ID."""
