@@ -171,7 +171,7 @@ jq -e '
   and ([.candidates[].coefficient] | sort) == [0.015625, 0.0625, 0.25, 1]
   and (.selected.coefficient > 0)' "${selection_tmp}" >/dev/null
 
-selection_path=${artifact_root}/fuzzy-topk-reconstruction-20tpp-hero-selection.json
+selection_path=${artifact_root}/fuzzy-topk-reconstruction-20tpp-hero-selection-${suite_sha:0:12}.json
 if [[ -e "${selection_path}" ]]; then
   if ! cmp -s "${selection_tmp}" "${selection_path}"; then
     printf 'ERROR: existing hero selection ledger disagrees with recomputation\n' >&2
@@ -288,7 +288,7 @@ run_cell "${dense_name}" \
   --base-learning-rate 0.00390625 \
   --seed 1350 \
   --timeout 28800 \
-  --checkpoint-policy none \
+  --checkpoint-policy qualifying \
   --color never \
   --name "${dense_name}" \
   --study-id "${study_id}" \
@@ -306,7 +306,7 @@ run_cell "${treatment_name}" \
   --base-learning-rate 0.00390625 \
   --seed 1350 \
   --timeout 28800 \
-  --checkpoint-policy none \
+  --checkpoint-policy qualifying \
   --color never \
   --name "${treatment_name}" \
   --study-id "${study_id}" \

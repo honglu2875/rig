@@ -30,7 +30,8 @@
     "target_dense_tokens_per_parameter": 20.0,
     "dataset_id": "fineweb-8b-gpt2",
     "dataset_manifest_canonical_sha256": "34b3a4a2098d31c2633b8065e3dad70a1f53ca8bff24c1061d344a01d68a6804",
-    "checkpoint_policy": "none",
+    "checkpoint_policy": "qualifying",
+    "checkpoint_semantics": "Official runs retain a deployment checkpoint only when they meet the configured qualification threshold.",
     "final_validation_predictions": 10485760,
     "validation_probe_every_steps": 500,
     "validation_probe_predictions": 1048576

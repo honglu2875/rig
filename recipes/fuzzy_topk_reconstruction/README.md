@@ -187,8 +187,9 @@ The dense arm runs its exact 18,838-step fixed-TPP horizon. The sparse arm runs
 18,624 steps, matching the dense arm's total deployed active matrix FLOPs to
 within 0.002%; its train-only reconstruction decoder's physical work remains
 reported rather than being used to shorten the learning horizon. The treatment
-retains per-feature activation-frequency captures every 100 steps. The
-dependent, fail-closed queue is
+retains per-feature activation-frequency captures every 100 steps. Both
+official arms use the standard qualifying-checkpoint policy. The dependent,
+fail-closed queue is
 [`launch_v4_125m_20tpp_hero.sh`](launch_v4_125m_20tpp_hero.sh).
 
 ## Reproduction checks
