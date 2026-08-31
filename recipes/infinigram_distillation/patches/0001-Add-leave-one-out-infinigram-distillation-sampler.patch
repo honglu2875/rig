@@ -1,0 +1,431 @@
+From 75090862f172742a0a6daaf574b8c5c9d33d1166 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Mon, 31 Aug 2026 14:35:48 +0000
+Subject: [PATCH] Add leave-one-out infinigram distillation sampler
+
+---
+ csrc/include/engine.h     | 138 ++++++++++++++++++++++++++++++++++++++
+ csrc/include/facade.h     |  15 +++++
+ src/ngram/_core.pyx       |  40 +++++++++++
+ src/ngram/cli.py          |  11 ++-
+ src/ngram/index.py        |  27 ++++++++
+ tests/test_correctness.py |  86 ++++++++++++++++++++++++
+ 6 files changed, 315 insertions(+), 2 deletions(-)
+
+diff --git a/csrc/include/engine.h b/csrc/include/engine.h
+index 322a092..b94b58d 100644
+--- a/csrc/include/engine.h
++++ b/csrc/include/engine.h
+@@ -296,6 +296,105 @@ class Engine {
+         });
+     }
+ 
++    // Draw one exact next-token sample from the infinite-gram distribution at
++    // every position, after removing one occurrence of the observed
++    // continuation.  This is the leave-one-occurrence-out teacher needed when
++    // the queried sequence itself belongs to the indexed corpus: without the
++    // subtraction, a unique context simply retrieves its own next token.
++    //
++    // `contexts[row, t]` is the final token visible to the model and
++    // `targets[row, t]` is the continuation to exclude.  When `has_reset` is
++    // true, matching context never extends to the left of the most recent
++    // reset token, but the reset token itself remains visible (BOS semantics).
++    // Returned counts are after the subtraction.  If the observed
++    // continuation does not occur, nothing is subtracted; this keeps the
++    // primitive useful for sequences not contained in the index as well.
++    void infgram_loo_sample_batch(const T *contexts, const T *targets, U64 rows, U64 cols,
++                                  U64 max_len, bool has_reset, T reset_token, U64 seed,
++                                  T *samples, U32 *suffix_lens, U64 *prompt_cnts,
++                                  U64 *target_cnts) const {
++        const size_t S = _shards.size();
++        struct Segment {
++            U64 row;
++            U64 begin;
++            U64 end;
++        };
++        std::vector<Segment> segments;
++        segments.reserve(rows * (has_reset ? 16 : 1));
++        for (U64 row = 0; row < rows; row++) {
++            const T *seq = contexts + row * cols;
++            U64 begin = 0;
++            if (has_reset) {
++                for (U64 t = 1; t < cols; t++) {
++                    if (seq[t] != reset_token) continue;
++                    segments.push_back(Segment{row, begin, t});
++                    begin = t;
++                }
++            }
++            if (begin < cols) segments.push_back(Segment{row, begin, cols});
++        }
++
++        // Documents are independent once reset semantics are enabled, so use
++        // them as the parallel work unit.  An 8k FineWeb batch has dozens of
++        // documents but only a handful of rows; row-level parallelism alone
++        // would leave most CPU cores idle.
++        _pool.parallel_for(0, segments.size(), [&](U64 task) {
++            const Segment seg = segments[task];
++            const U64 row = seg.row;
++            const T *seq = contexts + row * cols;
++            const T *truth = targets + row * cols;
++            RangeBuf ranges(S);
++            auto &ext = extension_scratch<T>();
++            U64 prev = 0;
++
++            for (U64 t = seg.begin; t < seg.end; t++) {
++                U64 cap = t - seg.begin + 1;
++                if (max_len > 0 && cap > max_len) cap = max_len;
++                U64 l = prev + 1;
++                if (l > cap) l = cap;
++
++                U64 available = 0;
++                U64 observed = 0;
++                U64 excluded = 0;
++                for (;;) {
++                    const T *pat = seq + t + 1 - l;
++                    find(pat, l, nullptr, ranges.data());
++                    available = successor_total(l, ranges.data());
++
++                    ext.assign(pat, pat + l);
++                    ext.push_back(truth[t]);
++                    observed = 0;
++                    for (size_t s = 0; s < S; s++) {
++                        observed += _shards[s]->find(ext.data(), l + 1, ranges[s]).size();
++                    }
++                    excluded = observed > 0 ? 1 : 0;
++                    if (available > excluded) break;
++                    if (l == 0) throw Error("cannot sample from an empty leave-one-out corpus");
++                    l--;
++                }
++
++                U64 state = seed ^ (0x9e3779b97f4a7c15ULL * (row * cols + t + 1));
++                T sampled;
++                for (;;) {
++                    U64 draw = splitmix64(state) % available;
++                    sampled = sample_successor(l, ranges.data(), draw);
++                    if (!excluded || sampled != truth[t]) break;
++                    // All `observed` matching continuations are exchangeable.
++                    // Reject one of them with probability 1/observed, which is
++                    // exactly equivalent to deleting the current occurrence.
++                    if (splitmix64(state) % observed != 0) break;
++                }
++
++                U64 idx = row * cols + t;
++                samples[idx] = sampled;
++                suffix_lens[idx] = static_cast<U32>(l);
++                prompt_cnts[idx] = available - excluded;
++                target_cnts[idx] = observed - excluded;
++                prev = l;
++            }
++        });
++    }
++
+     // Next-token distribution at every position of every row, returned as a
+     // ragged (CSR-style) structure.  `infinite` selects between a fixed context
+     // window and the longest matching suffix.
+@@ -319,6 +418,45 @@ class Engine {
+     }
+ 
+   private:
++    static U64 splitmix64(U64 &state) {
++        U64 z = (state += 0x9e3779b97f4a7c15ULL);
++        z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
++        z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
++        return z ^ (z >> 31);
++    }
++
++    // Number of occurrences in `ranges` that have a continuation.  For a
++    // non-empty pattern, at most one occurrence per shard is flush against the
++    // shard tail, and it is the first rank among equal suffixes.
++    U64 successor_total(U64 len, const Range *ranges) const {
++        U64 out = 0;
++        for (size_t s = 0; s < _shards.size(); s++) {
++            Range r = ranges[s];
++            if (r.empty()) continue;
++            T tok;
++            if (!_shards[s]->next_token(r.lo, len, &tok)) r.lo++;
++            out += r.size();
++        }
++        return out;
++    }
++
++    // Map a global rank among valid continuation occurrences back to its token.
++    T sample_successor(U64 len, const Range *ranges, U64 draw) const {
++        for (size_t s = 0; s < _shards.size(); s++) {
++            Range r = ranges[s];
++            if (r.empty()) continue;
++            T tok;
++            if (!_shards[s]->next_token(r.lo, len, &tok)) r.lo++;
++            if (draw < r.size()) {
++                if (!_shards[s]->next_token(r.lo + draw, len, &tok))
++                    throw Error("invalid continuation rank");
++                return tok;
++            }
++            draw -= r.size();
++        }
++        throw Error("continuation sample out of range");
++    }
++
+     // Walk the rank range, splitting until both ends agree on the next token.
+     // Cost is O(distinct * log range) probes.  Iterative on purpose: the
+     // reference implementation spawns a thread per recursion node, which
+diff --git a/csrc/include/facade.h b/csrc/include/facade.h
+index 1110979..bd554c2 100644
+--- a/csrc/include/facade.h
++++ b/csrc/include/facade.h
+@@ -67,6 +67,11 @@ class AnyEngine {
+     virtual void infgram_batch(const void *tokens, U64 rows, U64 cols, U64 max_len, double *probs,
+                                U32 *suffix_lens, U64 *prompt_cnts, U64 *cont_cnts) const = 0;
+ 
++    virtual void infgram_loo_sample_batch(
++        const void *contexts, const void *targets, U64 rows, U64 cols, U64 max_len,
++        bool has_reset, U64 reset_token, U64 seed, void *samples, U32 *suffix_lens,
++        U64 *prompt_cnts, U64 *target_cnts) const = 0;
++
+     virtual void ntd_batch(const void *tokens, U64 rows, U64 cols, U64 max_ctx, U64 max_support,
+                            bool infinite, std::vector<I64> *indptr, std::vector<U32> *tokens_out,
+                            std::vector<U64> *counts_out) const = 0;
+@@ -147,6 +152,16 @@ class TypedEngine final : public AnyEngine {
+                          pc, cc);
+     }
+ 
++    void infgram_loo_sample_batch(const void *contexts, const void *targets, U64 rows, U64 cols,
++                                  U64 max_len, bool has_reset, U64 reset_token, U64 seed,
++                                  void *samples, U32 *suffix_lens, U64 *pc,
++                                  U64 *tc) const override {
++        _e.infgram_loo_sample_batch(
++            static_cast<const T *>(contexts), static_cast<const T *>(targets), rows, cols,
++            max_len, has_reset, static_cast<T>(reset_token), seed, static_cast<T *>(samples),
++            suffix_lens, pc, tc);
++    }
++
+     void ntd_batch(const void *tokens, U64 rows, U64 cols, U64 max_ctx, U64 max_support,
+                    bool infinite, std::vector<I64> *indptr, std::vector<U32> *tokens_out,
+                    std::vector<U64> *counts_out) const override {
+diff --git a/src/ngram/_core.pyx b/src/ngram/_core.pyx
+index cf76d77..737ad90 100644
+--- a/src/ngram/_core.pyx
++++ b/src/ngram/_core.pyx
+@@ -93,6 +93,11 @@ cdef extern from "facade.h" namespace "ngram" nogil:
+         void infgram_batch(const void *tokens, uint64_t rows, uint64_t cols, uint64_t max_len,
+                            double *probs, uint32_t *suffix_lens, uint64_t *pc,
+                            uint64_t *cc) except +
++        void infgram_loo_sample_batch(const void *contexts, const void *targets,
++                                      uint64_t rows, uint64_t cols, uint64_t max_len,
++                                      cbool has_reset, uint64_t reset_token, uint64_t seed,
++                                      void *samples, uint32_t *suffix_lens, uint64_t *pc,
++                                      uint64_t *tc) except +
+         void ntd_batch(const void *tokens, uint64_t rows, uint64_t cols, uint64_t max_ctx,
+                        uint64_t max_support, cbool infinite, vector[int64_t] *indptr,
+                        vector[uint32_t] *tokens_out, vector[uint64_t] *counts_out) except +
+@@ -457,6 +462,41 @@ cdef class Engine:
+                                 &indptr, &ids, &counts)
+         return (_to_np_i64(indptr), _to_np_u32(ids), _to_np_u64(counts))
+ 
++    def infgram_loo_sample_batch(self, contexts, targets, uint64_t seed=0,
++                                 uint64_t max_len=0, reset_token=None):
++        """Sample exact leave-one-occurrence-out infinite-gram targets.
++
++        ``contexts`` and ``targets`` are equally shaped 2-D arrays.  At each
++        position, one occurrence of the observed target is removed before the
++        teacher sample is drawn.  Returns ``(samples, suffix_lens,
++        prompt_counts, target_counts)``; counts are after subtraction.
++        """
++        cdef cnp.ndarray x = np.ascontiguousarray(contexts, dtype=self.dtype)
++        cdef cnp.ndarray y = np.ascontiguousarray(targets, dtype=self.dtype)
++        if x.ndim != 2 or y.ndim != 2 or x.shape[0] != y.shape[0] or x.shape[1] != y.shape[1]:
++            raise ValueError("contexts and targets must be equally shaped 2-D arrays")
++        cdef uint64_t rows = x.shape[0]
++        cdef uint64_t cols = x.shape[1]
++        samples = np.empty((rows, cols), dtype=self.dtype)
++        slens = np.zeros((rows, cols), dtype=np.uint32)
++        pc = np.zeros((rows, cols), dtype=np.uint64)
++        tc = np.zeros((rows, cols), dtype=np.uint64)
++        cdef uint32_t[:, ::1] sl_v = slens
++        cdef uint64_t[:, ::1] pc_v = pc
++        cdef uint64_t[:, ::1] tc_v = tc
++        cdef const void *xp = cnp.PyArray_DATA(x)
++        cdef const void *yp = cnp.PyArray_DATA(y)
++        cdef void *sp = cnp.PyArray_DATA(samples)
++        cdef cbool has_reset = reset_token is not None
++        cdef uint64_t reset = 0 if reset_token is None else int(reset_token)
++        if rows == 0 or cols == 0:
++            return samples, slens, pc, tc
++        with nogil:
++            self._eng.infgram_loo_sample_batch(
++                xp, yp, rows, cols, max_len, has_reset, reset, seed, sp,
++                &sl_v[0, 0], &pc_v[0, 0], &tc_v[0, 0])
++        return samples, slens, pc, tc
++
+     def sample_occurrences(self, pat, uint64_t maxnum=10, uint64_t seed=0):
+         """Returns ``(total_count, shard_ids, positions)``."""
+         cdef cnp.ndarray a = self._as1d(pat)
+diff --git a/src/ngram/cli.py b/src/ngram/cli.py
+index 39855ea..f083732 100644
+--- a/src/ngram/cli.py
++++ b/src/ngram/cli.py
+@@ -58,7 +58,10 @@ def cmd_build(args) -> int:
+     from .readers import load_tokenizer
+ 
+     tokenizer = None
+-    if args.tokenizer:
++    # Pretokenized formats only need the tokenizer *name* recorded in
++    # config.json.  Loading transformers/tiktoken here made the documented
++    # llm.c fast path depend on an otherwise unused optional package.
++    if args.tokenizer and args.format == "jsonl":
+         tokenizer = load_tokenizer(args.tokenizer)
+ 
+     doc_sep = args.doc_sep_token
+@@ -101,10 +104,14 @@ def cmd_build(args) -> int:
+ def _open(args, threads: Optional[int] = None):
+     from .index import InfiniGram
+ 
++    text_query = args.cmd == "query" or (
++        args.cmd in {"count", "ntd", "infgram"}
++        and not getattr(args, "tokens", None)
++    )
+     return InfiniGram(
+         args.index,
+         threads=threads if threads is not None else getattr(args, "threads", 0),
+-        load_tokenizer=True,
++        load_tokenizer=text_query,
+     )
+ 
+ 
+diff --git a/src/ngram/index.py b/src/ngram/index.py
+index 49c63ab..cdfd3aa 100644
+--- a/src/ngram/index.py
++++ b/src/ngram/index.py
+@@ -369,6 +369,33 @@ class InfiniGram:
+             arr = arr[None, :]
+         return self._engine.ntd_batch(arr, max_ctx, max_support, infinite)
+ 
++    def infgram_loo_sample_batch(
++        self,
++        contexts: np.ndarray,
++        targets: np.ndarray,
++        *,
++        seed: int = 0,
++        max_len: int = 0,
++        reset_token: Optional[int] = None,
++    ):
++        """Sample an exact leave-one-occurrence-out teacher target per token.
++
++        This is intended for distillation on the indexed corpus itself.  One
++        occurrence of each observed continuation is removed, and the query
++        backs off until at least one other continuation remains.  Sampling one
++        target is an unbiased Monte Carlo estimator of cross-entropy against
++        the resulting sparse next-token distribution.
++
++        ``contexts[:, t]`` is visible when predicting ``targets[:, t]``.  If
++        ``reset_token`` is supplied, context cannot extend left of its latest
++        occurrence, while the reset token itself remains visible.
++        """
++        x = np.ascontiguousarray(contexts, dtype=self.dtype)
++        y = np.ascontiguousarray(targets, dtype=self.dtype)
++        return self._engine.infgram_loo_sample_batch(
++            x, y, seed, max_len, reset_token
++        )
++
+     # -- documents ----------------------------------------------------------
+ 
+     def search_docs(
+diff --git a/tests/test_correctness.py b/tests/test_correctness.py
+index 1a0905b..c2ddb83 100644
+--- a/tests/test_correctness.py
++++ b/tests/test_correctness.py
+@@ -219,6 +219,92 @@ def test_ntd_batch_matches_single(small_index, small_corpus):
+             assert list(counts[lo:hi]) == list(single.counts)
+ 
+ 
++def _loo_oracle(tokens, context, target, max_len=0):
++    context = [int(x) for x in context]
++    upper = len(context) if not max_len else min(len(context), max_len)
++    corpus = [int(x) for x in tokens]
++    for length in range(upper, -1, -1):
++        suffix = context[-length:] if length else []
++        counts = {}
++        for start in range(len(corpus) - length):
++            if corpus[start : start + length] != suffix:
++                continue
++            continuation = corpus[start + length]
++            counts[continuation] = counts.get(continuation, 0) + 1
++        if counts.get(int(target), 0):
++            counts[int(target)] -= 1
++            if counts[int(target)] == 0:
++                del counts[int(target)]
++        if counts:
++            return length, counts
++    raise AssertionError("non-empty corpus must yield a leave-one-out distribution")
++
++
++@pytest.mark.parametrize("max_len", [0, 3])
++def test_infgram_loo_samples_match_brute_force(
++    small_index, small_corpus, max_len
++):
++    # Start immediately before a document marker so the batch exercises both
++    # the previous document's EOT prediction and reset-token-as-BOS semantics.
++    marker = int(np.flatnonzero(small_corpus[100:] == 999)[0] + 100)
++    starts = [marker - 8, marker + 37]
++    x = np.stack([small_corpus[s : s + 64] for s in starts])
++    y = np.stack([small_corpus[s + 1 : s + 65] for s in starts])
++
++    got, slens, prompt_counts, target_counts = (
++        small_index.infgram_loo_sample_batch(
++            x, y, seed=12345, max_len=max_len, reset_token=999
++        )
++    )
++    again = small_index.infgram_loo_sample_batch(
++        x, y, seed=12345, max_len=max_len, reset_token=999
++    )[0]
++    assert np.array_equal(got, again)
++
++    for row in range(x.shape[0]):
++        segment_start = 0
++        for t in range(x.shape[1]):
++            if int(x[row, t]) == 999:
++                segment_start = t
++            context = x[row, segment_start : t + 1]
++            length, counts = _loo_oracle(
++                small_corpus, context, int(y[row, t]), max_len=max_len
++            )
++            assert int(slens[row, t]) == length
++            assert int(prompt_counts[row, t]) == sum(counts.values())
++            assert int(target_counts[row, t]) == counts.get(int(y[row, t]), 0)
++            assert int(got[row, t]) in counts
++
++
++def test_infgram_loo_sampling_frequencies_match_adjusted_distribution(
++    small_index, small_oracle
++):
++    context_token = 3
++    raw = small_oracle.ntd([context_token])
++    observed = max(raw, key=raw.get)
++    expected = dict(raw)
++    expected[observed] -= 1
++    if expected[observed] == 0:
++        del expected[observed]
++    total = sum(expected.values())
++
++    rows = 20_000
++    x = np.full((rows, 1), context_token, dtype=np.uint16)
++    y = np.full((rows, 1), observed, dtype=np.uint16)
++    samples, slens, prompt_counts, target_counts = (
++        small_index.infgram_loo_sample_batch(x, y, seed=991)
++    )
++
++    assert np.all(slens == 1)
++    assert np.all(prompt_counts == total)
++    assert np.all(target_counts == expected.get(observed, 0))
++    values, counts = np.unique(samples, return_counts=True)
++    empirical = {int(v): int(c) / rows for v, c in zip(values, counts)}
++    assert set(empirical) == set(expected)
++    for token, count in expected.items():
++        assert empirical[token] == pytest.approx(count / total, abs=0.015)
++
++
+ # --------------------------------------------------------------------------
+ # structural invariants
+ # --------------------------------------------------------------------------
+-- 
+2.25.1
+

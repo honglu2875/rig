@@ -9,6 +9,8 @@ from .linear_cross_entropy import (
     DEFAULT_VOCAB_TILE_SIZE,
     tiled_tied_cross_entropy,
     tiled_tied_cross_entropy_losses,
+    tiled_tied_weighted_dual_cross_entropy,
+    tiled_tied_weighted_dual_cross_entropy_losses,
 )
 from .double_fuzzy_topk import (
     DoubleFuzzyTopKCallable,
@@ -86,5 +88,7 @@ __all__ = (
     "sparse_topk_mlp",
     "tiled_tied_cross_entropy",
     "tiled_tied_cross_entropy_losses",
+    "tiled_tied_weighted_dual_cross_entropy",
+    "tiled_tied_weighted_dual_cross_entropy_losses",
     "topk_relu",
 )
