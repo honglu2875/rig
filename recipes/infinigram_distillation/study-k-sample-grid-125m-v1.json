@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "study_id": "infinigram-k-sample-grid-125m",
+  "status": "launch_contract_frozen_9_runs_queued",
+  "objective": "Test whether reducing Monte Carlo variance with K leave-one-out infinigram samples per training position makes weak infinigram distillation useful.",
+  "hypothesis": "K in {16, 32, 64} supplies a materially denser estimate of the teacher cross-entropy, while b below the prior K=1 optimum avoids over-weighting an imperfect corpus teacher.",
+  "common": {
+    "recipe": "infinigram_distillation",
+    "profile": "dev",
+    "tier": "125m",
+    "context": "8k",
+    "seed": 1337,
+    "tokens_per_parameter": 5,
+    "schedule_steps": 4709,
+    "planned_tokens": 617218048,
+    "batch_size": 16,
+    "sequence_length": 8192,
+    "tokens_per_step": 131072,
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "dataset_id": "fineweb-8b-gpt2",
+    "index_path": "/home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1",
+    "index_tokens": 7900000000,
+    "query_threads_per_host": 30
+  },
+  "objective_definition": {
+    "formula": "(1 - b) * CE(ground_truth, model) + b * mean_j CE(sample_j, model)",
+    "sampling": "K iid draws with replacement from the exact leave-one-occurrence-out infinite-gram distribution at each position",
+    "variance": "The sampled teacher term is unbiased; conditional Monte Carlo variance decreases as 1/K.",
+    "coupling": "For a fixed seed and position, K=16 is a prefix of K=32, which is a prefix of K=64.",
+    "validation": "Canonical validation is ground-truth cross-entropy only."
+  },
+  "grid": {
+    "infinigram_weights": [0.025, 0.05, 0.1],
+    "samples_per_position": [16, 32, 64],
+    "cells": 9,
+    "replicates_per_cell": 1,
+    "selection_rule": "Run every cell to the complete 5-TPP endpoint; rank by canonical validation loss and compare with the reused dense and K=1 controls."
+  },
+  "reused_controls": {
+    "dense_seed_1337": {
+      "run_id": "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+      "status": "sealed_complete_verified"
+    },
+    "k1_seed_1337": {
+      "b_0.10": {
+        "run_id": "20260831T181950.761017Z-infinigram_distillation-infinigram-b010-s1337-ecaa22c4",
+        "validation_loss": 3.6410042345523834
+      },
+      "b_0.25": {
+        "run_id": "20260831T183550.129312Z-infinigram_distillation-infinigram-b025-s1337-07c6627e",
+        "validation_loss": 3.678785115480423
+      },
+      "b_0.50": {
+        "run_id": "20260831T185150.764135Z-infinigram_distillation-infinigram-b050-s1337-b0a721ed",
+        "validation_loss": 3.7929647564888
+      }
+    }
+  },
+  "systems_gate": {
+    "shape": "125M, context 8192, global batch 16, 100 optimizer steps",
+    "status": "accepted",
+    "acceptance": "Every requested K compiles, fits, and remains within a 20% training-throughput reduction from K=1.",
+    "measurements": {
+      "k1": {
+        "run_id": "20260901T090406.309816Z-infinigram_distillation-ksample-bench-k1-b010-e0151b21",
+        "tokens_per_second": 713092.0515474984
+      },
+      "k16": {
+        "run_id": "20260901T094008.770600Z-infinigram_distillation-ksample-sparse-bench-k16-b010-fd05b2cb",
+        "tokens_per_second": 672068.7713715766,
+        "throughput_reduction_fraction": 0.0575287328726287
+      },
+      "k32": {
+        "run_ids": [
+          "20260901T092648.363019Z-infinigram_distillation-ksample-sparse-bench-k32-b010-4a4a2582",
+          "20260901T093406.589452Z-infinigram_distillation-ksample-sparse-repeat2-k32-b010-ef81f005"
+        ],
+        "tokens_per_second_range": [625342.1756726126, 639693.6188329649],
+        "throughput_reduction_fraction_range": [0.1029300281921993, 0.1230778762102149],
+        "trajectory_check": "training.riglog and diagnostics.riglog are byte-identical across the two launches",
+        "training_riglog_sha256": "fd8364b8b9a168427f027a005c22e4f3271c7439e091b1be043f5738603c0a67",
+        "diagnostics_riglog_sha256": "f8c25044a8a5e56bf1f2bfb96791e7eee18decdf407080d439cf3adbdff04f5b"
+      },
+      "k64": {
+        "run_id": "20260901T093654.555209Z-infinigram_distillation-ksample-sparse-bench-k64-b010-d047f27c",
+        "tokens_per_second": 599759.6215583693,
+        "throughput_reduction_fraction": 0.1589324111875644
+      }
+    }
+  },
+  "implementation": {
+    "host_query": "Search/backoff/count once per position, then draw K times from one adjusted continuation distribution.",
+    "forward_loss": "One tiled vocabulary log-normalizer plus K embedding-row target logits accumulated one at a time.",
+    "backward_loss": "The tiled vocabulary loop computes softmax and ground-truth terms; teacher corrections use bounded chunks of eight gathered rows and sparse embedding-row scatter-adds, O(KD).",
+    "maximum_teacher_chunk_shape": "[local_positions, 8, d_model]",
+    "forbidden_materializations": [
+      "[positions, K, vocabulary]",
+      "[positions, K, d_model]"
+    ]
+  },
+  "source_contract": {
+    "git_commit": "7ffa37a838aaadf6495a30fd702a8617aad76175",
+    "train_py_sha256": "ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12",
+    "dev_config_sha256": "fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f",
+    "linear_cross_entropy_sha256": "91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92",
+    "ngram_base_patch_sha256": "207ea29cc3b2a8f2c740034ad8e1b9b428380ecd2bb54b2e64b067fd48e7072b",
+    "ngram_k_sample_patch_sha256": "2fb075ba5536e79abcb0fca63e147551629448c1dd641291edc26ac18eafe015",
+    "ngram_extension_sha256": "0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925",
+    "dataset_manifest_sha256": "d77eb50e311bd36b8a3fc3ec4da4c71c6b200c308167a3afcb3a27f75a430d52"
+  },
+  "launch_policy": "Launch all nine cells sequentially in increasing K and then increasing b. Do not select, retry, or stop based on intermediate quality observations.",
+  "stopping_rule": "Every cell runs through all 4709 optimizer steps. A systems failure stops the queue for inspection; a scientific outcome does not."
+}

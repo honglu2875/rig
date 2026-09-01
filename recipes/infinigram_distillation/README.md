@@ -36,6 +36,13 @@ It neither materializes teacher logits nor repeats the vocabulary-wide output
 projection. `--infinigram-samples` selects K and defaults to 1 for exact
 backward compatibility. Canonical validation remains ground-truth-only.
 
+For K greater than one, the custom VJP keeps the vocabulary-wide softmax and
+ground-truth correction in the existing tiled matmul loop, then applies the K
+teacher corrections sparsely in chunks of eight gathered embedding rows. This
+is O(KD), rather than comparing K target ids with all V vocabulary rows. The
+largest live teacher temporary is `[positions, 8, D]`; no `[positions, K, V]`
+or `[positions, K, D]` tensor is formed. K=1 retains the previous tiled path.
+
 ## Why leave one occurrence out
 
 The teacher index contains the same FineWeb training split. A vanilla
@@ -121,6 +128,14 @@ run seed, the K=16 samples are the prefix of K=32 and K=64, reducing irrelevant
 Monte Carlo differences between columns. This grid tests whether the prior
 teacher signal was too noisy while concentrating weight below the best K=1
 coefficient. It reuses the completed dense and K=1 controls.
+
+The v4-32 throughput gate used the exact 125M, 8k-context shape for 100 steps.
+Against 713k token/s at K=1, the accepted sparse-gradient path measured 672k
+at K=16, 625–640k at K=32, and 600k at K=64. Thus the throughput reductions
+were about 6%, 10–12%, and 16%, respectively. Two independent K=32 launches
+produced byte-identical training and diagnostic logs. The frozen launch
+contract is in
+[`study-k-sample-grid-125m-v1.json`](study-k-sample-grid-125m-v1.json).
 
 ```bash
 uv run --frozen --no-sync rig run infinigram_distillation \
