@@ -530,23 +530,21 @@ def _tiled_weighted_multi_losses_bwd(
         )
         primary_mass = flat_primary[:, None] == vocabulary_ids[None, :]
 
-        # Build only this vocabulary tile of the empirical teacher
-        # distribution. The O(K) comparisons sit beside an O(width) MXU
-        # projection, while the live target mass stays [positions, tile].
-        def add_sample_mass(sample_index: jax.Array, mass: jax.Array) -> jax.Array:
-            sample_targets = jax.lax.dynamic_index_in_dim(
-                flat_distill, sample_index, axis=1, keepdims=False
-            )
-            return mass + (
-                sample_targets[:, None] == vocabulary_ids[None, :]
-            ).astype(jnp.float32)
-
-        distill_mass = jax.lax.fori_loop(
-            0,
-            samples_per_position,
-            add_sample_mass,
-            jnp.zeros_like(probabilities, dtype=jnp.float32),
-        ) / float(samples_per_position)
+        # Count the K sparse target ids directly into this vocabulary tile.
+        # Integer addition makes duplicate targets deterministic, while one
+        # [positions, K] scatter avoids rereading a full [positions, tile]
+        # accumulator K times. Invalid local ids are clipped only for the
+        # scatter address and contribute an exactly-zero update.
+        local_targets = flat_distill - start
+        in_tile = (local_targets >= 0) & (local_targets < vocab_tile_size)
+        safe_local_targets = jnp.clip(local_targets, 0, vocab_tile_size - 1)
+        row_ids = jnp.arange(flat_hidden.shape[0], dtype=jnp.int32)[:, None]
+        distill_counts = jnp.zeros(
+            probabilities.shape, dtype=jnp.int32
+        ).at[row_ids, safe_local_targets].add(in_tile.astype(jnp.int32))
+        distill_mass = distill_counts.astype(jnp.float32) / float(
+            samples_per_position
+        )
         logits_gradient = (
             total_weight * probabilities
             - primary_weight * primary_mass.astype(jnp.float32)
