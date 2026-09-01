@@ -530,39 +530,13 @@ def _tiled_weighted_multi_losses_bwd(
         )
         primary_mass = flat_primary[:, None] == vocabulary_ids[None, :]
 
-        # Compare a bounded static chunk of samples at once and immediately
-        # reduce it into integer counts. This keeps duplicate handling exact,
-        # cuts full-tile accumulator traffic by up to 8x, and bounds the live
-        # comparison temporary independently of K.
-        sample_chunk_size = min(samples_per_position, 8)
-        sample_chunk_count = (
-            samples_per_position + sample_chunk_size - 1
-        ) // sample_chunk_size
-        padded_sample_count = sample_chunk_count * sample_chunk_size
-        padded_distill = jnp.pad(
-            flat_distill,
-            ((0, 0), (0, padded_sample_count - samples_per_position)),
-            constant_values=-1,
-        )
-
-        def add_sample_chunk(chunk_index: jax.Array, counts: jax.Array) -> jax.Array:
-            chunk = jax.lax.dynamic_slice_in_dim(
-                padded_distill,
-                chunk_index * sample_chunk_size,
-                sample_chunk_size,
-                axis=1,
-            )
-            matches = chunk[:, :, None] == vocabulary_ids[None, None, :]
-            return counts + jnp.sum(matches, axis=1, dtype=jnp.int32)
-
-        distill_counts = jax.lax.fori_loop(
-            0,
-            sample_chunk_count,
-            add_sample_chunk,
-            jnp.zeros(probabilities.shape, dtype=jnp.int32),
-        )
-        distill_mass = distill_counts.astype(jnp.float32) / float(
-            samples_per_position
+        # Preserve the established K=1 path exactly. For K>1, sparse teacher
+        # corrections are applied once after the vocabulary loop instead of
+        # scanning all K ids against every vocabulary row.
+        distill_mass = (
+            (flat_distill[:, :1] == vocabulary_ids[None, :]).astype(jnp.float32)
+            if samples_per_position == 1
+            else 0.0
         )
         logits_gradient = (
             total_weight * probabilities
@@ -592,6 +566,60 @@ def _tiled_weighted_multi_losses_bwd(
     grad_hidden, grad_embedding = jax.lax.fori_loop(
         0, tile_count, tile_backward, (grad_hidden, grad_embedding)
     )
+    if samples_per_position > 1 and distill_weight > 0.0:
+        # The target correction is sparse in vocabulary space. Process eight
+        # samples at a time so gathered weights stay bounded, then scatter the
+        # corresponding hidden-vector updates directly into embedding rows.
+        # This changes O(K * vocab) target comparisons into O(K * width) work.
+        sample_chunk_size = min(samples_per_position, 8)
+        sample_chunk_count = (
+            samples_per_position + sample_chunk_size - 1
+        ) // sample_chunk_size
+        padded_sample_count = sample_chunk_count * sample_chunk_size
+        safe_distill = jnp.clip(flat_distill, 0, semantic_vocab_size - 1)
+        padded_distill = jnp.pad(
+            safe_distill,
+            ((0, 0), (0, padded_sample_count - samples_per_position)),
+        )
+        padded_sample_valid = jnp.arange(padded_sample_count) < samples_per_position
+        teacher_coefficient = (
+            -distill_weight
+            * flat_cotangent
+            / float(samples_per_position)
+        ).astype(compute_dtype)
+        hidden_compute = flat_hidden.astype(compute_dtype)
+
+        def add_sparse_teacher_chunk(
+            chunk_index: jax.Array, state: tuple[jax.Array, jax.Array]
+        ) -> tuple[jax.Array, jax.Array]:
+            hidden_gradient, embedding_gradient = state
+            offset = chunk_index * sample_chunk_size
+            targets = jax.lax.dynamic_slice_in_dim(
+                padded_distill, offset, sample_chunk_size, axis=1
+            )
+            sample_valid = jax.lax.dynamic_slice_in_dim(
+                padded_sample_valid, offset, sample_chunk_size, axis=0
+            )
+            coefficients = teacher_coefficient[:, None] * sample_valid[None, :]
+            target_weights = embedding[targets].astype(compute_dtype)
+            hidden_gradient += jnp.sum(
+                (coefficients[:, :, None] * target_weights).astype(jnp.float32),
+                axis=1,
+            )
+            embedding_updates = (
+                coefficients[:, :, None] * hidden_compute[:, None, :]
+            ).astype(jnp.float32)
+            embedding_gradient = embedding_gradient.at[targets].add(
+                embedding_updates
+            )
+            return hidden_gradient, embedding_gradient
+
+        grad_hidden, grad_embedding = jax.lax.fori_loop(
+            0,
+            sample_chunk_count,
+            add_sparse_teacher_chunk,
+            (grad_hidden, grad_embedding),
+        )
     return (
         grad_hidden.reshape(loss_cotangent.shape + (flat_hidden.shape[-1],)).astype(
             flat_hidden.dtype
