@@ -153,12 +153,32 @@ objective. The prior K=1, b=0.10 endpoint of 3.641004 is only 0.000525 below
 the paired dense run, far inside the dense three-seed spread and not evidence
 of an improvement.
 
-The next controlled follow-up fixes K=16 and asks whether its lower-variance
-teacher correction prefers a higher learning rate. It crosses the same three
-teacher weights with 1.25x, 1.5x, and 2x the 2^-8 base-LR anchor, while reusing
-the completed 1x row. The resulting 4-by-3 surface changes no other training
-field. Its frozen contract is in
+The learning-rate follow-up fixed K=16 and crossed the same three teacher
+weights with 1.25x, 1.5x, and 2x the 2^-8 base-LR anchor, while reusing the
+completed 1x row. Its canonical validation surface was:
+
+| base-LR multiplier | b=0.025 | b=0.05 | b=0.10 |
+|---:|---:|---:|---:|
+| **1.0x** | **3.653455** | **3.670624** | **3.707323** |
+| 1.25x | 3.660932 | 3.679066 | 3.717053 |
+| 1.5x | 3.716397 | 3.725557 | 3.739457 |
+| 2x | 3.724212 | 3.753610 | 3.801402 |
+
+Every LR increase worsened every teacher-weight cell. Full-run throughput
+remained 699–704k token/s, so the degradation is not a systems artifact. The
+frozen contract is in
 [`study-k16-learning-rate-grid-125m-v1.json`](study-k16-learning-rate-grid-125m-v1.json).
+
+The scaling hero returns to the only development setting that reached the
+paired dense control: K=1 and b=0.10. It trains a 500M, 8k-context model for
+20 TPP at seed 1337, paired with a newly trained b=0 control under the exact
+same contract. Existing 500M heroes are not reused because they use 1k context
+and batch 128 rather than 8k context, document masking, and batch 16. The
+treatment runs first, followed by the control. Checkpoints, activation
+distributions, and sparsity snapshots are disabled; only compact standard
+training, scalar diagnostic, validation, metrics, and provenance artifacts are
+written. The frozen protocol is in
+[`study-k1-500m-20tpp-hero-v1.json`](study-k1-500m-20tpp-hero-v1.json).
 
 ```bash
 uv run --frozen --no-sync rig run infinigram_distillation \

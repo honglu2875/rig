@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "study_id": "infinigram-k1-500m-20tpp-hero",
+  "status": "launch_contract_frozen_two_production_runs",
+  "objective": "Test the best 125M K=1 infinigram setting at 500M and 20 TPP against a newly trained, exactly matched 8k dense control.",
+  "hypothesis": "The K=1, b=0.10 treatment that tied the paired 125M development control may separate from dense training at a larger model and longer horizon.",
+  "common": {
+    "recipe": "infinigram_distillation",
+    "profile": "dev",
+    "tier": "500m",
+    "model_parameters": 502602240,
+    "context": "8k",
+    "document_masking": true,
+    "seed": 1337,
+    "tokens_per_parameter": 20,
+    "schedule_steps": 76691,
+    "planned_tokens": 10052042752,
+    "batch_size": 16,
+    "sequence_length": 8192,
+    "tokens_per_step": 131072,
+    "base_learning_rate": 0.00390625,
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "dataset_id": "fineweb-8b-gpt2",
+    "query_threads_per_host": 30
+  },
+  "arms": [
+    {
+      "point": "k1-b010",
+      "role": "treatment",
+      "ground_truth_weight": 0.9,
+      "infinigram_weight": 0.1,
+      "infinigram_samples": 1,
+      "active_teacher_samples": 1,
+      "index_path": "/home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1",
+      "index_tokens": 7900000000
+    },
+    {
+      "point": "dense-b000",
+      "role": "matched_control",
+      "ground_truth_weight": 1.0,
+      "infinigram_weight": 0.0,
+      "infinigram_samples": 1,
+      "active_teacher_samples": 0,
+      "index_path": null,
+      "index_tokens": 0
+    }
+  ],
+  "comparison_contract": {
+    "changed_variable": "The treatment replaces 10% of the ground-truth target cross-entropy with one exact leave-one-occurrence-out infinigram continuation sample per training position.",
+    "held_fixed": "Architecture, initialization, seed, shuffled data order, token horizon, context, document mask, global batch, optimizer, LR schedule, weight decay, kernels, validation examples, runtime, and TPU topology.",
+    "validation": "Canonical ground-truth cross-entropy on the same deterministic 1,048,576 held-out FineWeb tokens; no teacher term is used in validation.",
+    "existing_500m_controls_rejected": "The sealed 500M/20-TPP controls use 1k context and batch 128. They are not used because the treatment contract is 8k context, document masking, and batch 16."
+  },
+  "development_basis": {
+    "tier": "125m",
+    "tokens_per_parameter": 5,
+    "context": "8k",
+    "dense_seed_1337_validation_loss": 3.641529,
+    "k1_b010_seed_1337_run_id": "20260831T181950.761017Z-infinigram_distillation-infinigram-b010-s1337-ecaa22c4",
+    "k1_b010_seed_1337_validation_loss": 3.6410042345523834,
+    "paired_delta": -0.0005247654476166,
+    "interpretation": "The difference is much smaller than the dense three-seed spread; this hero is a scaling test, not promotion of a proven winner."
+  },
+  "systems_gate": {
+    "point": "k1-b010-preflight",
+    "stop_after_step": 120,
+    "schedule_steps_unchanged": 76691,
+    "admission": "The treatment must compile on all 16 chips, fit memory, complete 120 optimizer steps with finite loss and gradients, sustain host queries without starvation, validate, and write the compact standard artifacts. The gate is excluded from the scientific comparison."
+  },
+  "logging_contract": {
+    "training_every_steps": 10,
+    "ordinary_diagnostics_every_steps": 10,
+    "activation_distribution_logging": false,
+    "sparsity_snapshot_logging": false,
+    "checkpoints": false,
+    "artifacts": [
+      "training.riglog",
+      "diagnostics.riglog",
+      "validation.csv",
+      "metrics.json",
+      "result.json",
+      "stdout.log",
+      "stderr.log"
+    ]
+  },
+  "source_contract": {
+    "git_commit_before_protocol": "6d79d89ca1f30ad3691c9480f919d364f4873590",
+    "train_py_sha256": "ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12",
+    "dev_config_sha256": "fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f",
+    "linear_cross_entropy_sha256": "91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92",
+    "ngram_base_patch_sha256": "207ea29cc3b2a8f2c740034ad8e1b9b428380ecd2bb54b2e64b067fd48e7072b",
+    "ngram_k_sample_patch_sha256": "2fb075ba5536e79abcb0fca63e147551629448c1dd641291edc26ac18eafe015",
+    "ngram_extension_sha256": "0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925",
+    "dataset_manifest_sha256": "d77eb50e311bd36b8a3fc3ec4da4c71c6b200c308167a3afcb3a27f75a430d52"
+  },
+  "launch_policy": "After the treatment feasibility gate passes, launch the full treatment first so the novel result matures earliest, then the matched dense control. Do not retry, select, or stop based on intermediate quality.",
+  "stopping_rule": "Both production arms run through all 76,691 steps. A systems or non-finite failure stops the queue for inspection; an unfavorable scientific trajectory does not."
+}
