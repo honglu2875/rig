@@ -77,6 +77,18 @@ def _validate_inputs(
         raise ValueError(f"vocab_tile_size must be positive, got {vocab_tile_size}")
 
 
+def _validate_multi_targets(hidden: jax.Array, targets: jax.Array) -> None:
+    if targets.ndim != hidden.ndim or targets.shape[:-1] != hidden.shape[:-1]:
+        raise ValueError(
+            "multi-target ids must have shape hidden.shape[:-1] + [K]; "
+            f"got {targets.shape} for hidden {hidden.shape}"
+        )
+    if targets.shape[-1] <= 0:
+        raise ValueError("multi-target sample count K must be positive")
+    if not jnp.issubdtype(targets.dtype, jnp.integer):
+        raise TypeError(f"targets must have an integer dtype, got {targets.dtype}")
+
+
 def _padded_embedding(
     embedding: jax.Array, semantic_vocab_size: int, vocab_tile_size: int
 ) -> tuple[jax.Array, int]:
@@ -306,7 +318,7 @@ def _tiled_losses_bwd(
 _tiled_losses.defvjp(_tiled_losses_fwd, _tiled_losses_bwd)
 
 
-def _weighted_dual_losses_and_residual(
+def _weighted_multi_losses_and_residual(
     hidden: jax.Array,
     embedding: jax.Array,
     primary_targets: jax.Array,
@@ -317,11 +329,12 @@ def _weighted_dual_losses_and_residual(
     vocab_tile_size: int,
     compute_dtype: jnp.dtype,
 ) -> tuple[jax.Array, tuple[jax.Array, ...]]:
-    """Forward pass for two hard targets sharing one tiled normalization."""
+    """Forward pass for one primary and K sampled distillation targets."""
 
     flat_hidden = hidden.reshape((-1, hidden.shape[-1]))
     flat_primary = primary_targets.reshape((-1,))
-    flat_distill = distill_targets.reshape((-1,))
+    samples_per_position = distill_targets.shape[-1]
+    flat_distill = distill_targets.reshape((-1, samples_per_position))
     padded_embedding, tile_count = _padded_embedding(
         embedding, semantic_vocab_size, vocab_tile_size
     )
@@ -355,7 +368,9 @@ def _weighted_dual_losses_and_residual(
     log_normalizer = maximum + jnp.log(exponential_sum)
 
     valid_primary = (flat_primary >= 0) & (flat_primary < semantic_vocab_size)
-    valid_distill = (flat_distill >= 0) & (flat_distill < semantic_vocab_size)
+    valid_distill = jnp.all(
+        (flat_distill >= 0) & (flat_distill < semantic_vocab_size), axis=1
+    )
     safe_primary = jnp.clip(flat_primary, 0, semantic_vocab_size - 1)
     safe_distill = jnp.clip(flat_distill, 0, semantic_vocab_size - 1)
     primary_logits = jnp.einsum(
@@ -364,12 +379,28 @@ def _weighted_dual_losses_and_residual(
         embedding[safe_primary].astype(compute_dtype),
         preferred_element_type=jnp.float32,
     )
-    distill_logits = jnp.einsum(
-        "nd,nd->n",
-        flat_hidden.astype(compute_dtype),
-        embedding[safe_distill].astype(compute_dtype),
-        preferred_element_type=jnp.float32,
-    )
+
+    # Walk the static sample dimension so only one [positions, width] gather
+    # is live at a time. Materializing [positions, K, width] would turn even
+    # K=16 into a multi-GiB temporary at the 8k training shape.
+    def add_sample_logit(sample_index: jax.Array, total: jax.Array) -> jax.Array:
+        sample_targets = jax.lax.dynamic_index_in_dim(
+            safe_distill, sample_index, axis=1, keepdims=False
+        )
+        sample_logits = jnp.einsum(
+            "nd,nd->n",
+            flat_hidden.astype(compute_dtype),
+            embedding[sample_targets].astype(compute_dtype),
+            preferred_element_type=jnp.float32,
+        )
+        return total + sample_logits
+
+    distill_logits = jax.lax.fori_loop(
+        0,
+        samples_per_position,
+        add_sample_logit,
+        jnp.zeros((flat_hidden.shape[0],), dtype=jnp.float32),
+    ) / float(samples_per_position)
     valid = jnp.logical_and(
         valid_primary if primary_weight > 0.0 else True,
         valid_distill if distill_weight > 0.0 else True,
@@ -391,7 +422,7 @@ def _weighted_dual_losses_and_residual(
 
 
 @partial(jax.custom_vjp, nondiff_argnums=(4, 5, 6, 7, 8))
-def _tiled_weighted_dual_losses(
+def _tiled_weighted_multi_losses(
     hidden: jax.Array,
     embedding: jax.Array,
     primary_targets: jax.Array,
@@ -402,7 +433,7 @@ def _tiled_weighted_dual_losses(
     vocab_tile_size: int,
     compute_dtype: jnp.dtype,
 ) -> jax.Array:
-    losses, _ = _weighted_dual_losses_and_residual(
+    losses, _ = _weighted_multi_losses_and_residual(
         hidden,
         embedding,
         primary_targets,
@@ -416,7 +447,7 @@ def _tiled_weighted_dual_losses(
     return losses
 
 
-def _tiled_weighted_dual_losses_fwd(
+def _tiled_weighted_multi_losses_fwd(
     hidden: jax.Array,
     embedding: jax.Array,
     primary_targets: jax.Array,
@@ -427,7 +458,7 @@ def _tiled_weighted_dual_losses_fwd(
     vocab_tile_size: int,
     compute_dtype: jnp.dtype,
 ) -> tuple[jax.Array, tuple[jax.Array, ...]]:
-    return _weighted_dual_losses_and_residual(
+    return _weighted_multi_losses_and_residual(
         hidden,
         embedding,
         primary_targets,
@@ -440,7 +471,7 @@ def _tiled_weighted_dual_losses_fwd(
     )
 
 
-def _tiled_weighted_dual_losses_bwd(
+def _tiled_weighted_multi_losses_bwd(
     primary_weight: float,
     distill_weight: float,
     semantic_vocab_size: int,
@@ -450,13 +481,16 @@ def _tiled_weighted_dual_losses_bwd(
     loss_cotangent: jax.Array,
 ) -> tuple[jax.Array | None, ...]:
     flat_hidden, embedding, flat_primary, flat_distill, log_normalizer = residual
+    samples_per_position = flat_distill.shape[1]
     padded_embedding, tile_count = _padded_embedding(
         embedding, semantic_vocab_size, vocab_tile_size
     )
     padded_vocab = padded_embedding.shape[0]
     positions = jnp.arange(vocab_tile_size, dtype=jnp.int32)
     valid_primary = (flat_primary >= 0) & (flat_primary < semantic_vocab_size)
-    valid_distill = (flat_distill >= 0) & (flat_distill < semantic_vocab_size)
+    valid_distill = jnp.all(
+        (flat_distill >= 0) & (flat_distill < semantic_vocab_size), axis=1
+    )
     valid = jnp.logical_and(
         valid_primary if primary_weight > 0.0 else True,
         valid_distill if distill_weight > 0.0 else True,
@@ -495,11 +529,28 @@ def _tiled_weighted_dual_losses_bwd(
             0.0,
         )
         primary_mass = flat_primary[:, None] == vocabulary_ids[None, :]
-        distill_mass = flat_distill[:, None] == vocabulary_ids[None, :]
+
+        # Build only this vocabulary tile of the empirical teacher
+        # distribution. The O(K) comparisons sit beside an O(width) MXU
+        # projection, while the live target mass stays [positions, tile].
+        def add_sample_mass(sample_index: jax.Array, mass: jax.Array) -> jax.Array:
+            sample_targets = jax.lax.dynamic_index_in_dim(
+                flat_distill, sample_index, axis=1, keepdims=False
+            )
+            return mass + (
+                sample_targets[:, None] == vocabulary_ids[None, :]
+            ).astype(jnp.float32)
+
+        distill_mass = jax.lax.fori_loop(
+            0,
+            samples_per_position,
+            add_sample_mass,
+            jnp.zeros_like(probabilities, dtype=jnp.float32),
+        ) / float(samples_per_position)
         logits_gradient = (
             total_weight * probabilities
             - primary_weight * primary_mass.astype(jnp.float32)
-            - distill_weight * distill_mass.astype(jnp.float32)
+            - distill_weight * distill_mass
         ) * flat_cotangent[:, None]
 
         hidden_gradient += jnp.einsum(
@@ -534,8 +585,8 @@ def _tiled_weighted_dual_losses_bwd(
     )
 
 
-_tiled_weighted_dual_losses.defvjp(
-    _tiled_weighted_dual_losses_fwd, _tiled_weighted_dual_losses_bwd
+_tiled_weighted_multi_losses.defvjp(
+    _tiled_weighted_multi_losses_fwd, _tiled_weighted_multi_losses_bwd
 )
 
 
@@ -580,7 +631,7 @@ def tiled_tied_cross_entropy_losses(
     )
 
 
-def tiled_tied_weighted_dual_cross_entropy_losses(
+def tiled_tied_weighted_multi_cross_entropy_losses(
     hidden: jax.Array,
     embedding: jax.Array,
     primary_targets: jax.Array,
@@ -592,12 +643,13 @@ def tiled_tied_weighted_dual_cross_entropy_losses(
     vocab_tile_size: int = DEFAULT_VOCAB_TILE_SIZE,
     compute_dtype: Any = jnp.bfloat16,
 ) -> jax.Array:
-    """Return ``a*CE(primary) + b*CE(distill)`` from one output projection.
+    """Return primary CE plus the mean CE of K sampled teacher targets.
 
-    The two targets are hard token ids. When ``distill_targets`` are sampled
-    from a teacher distribution, the expectation of this loss is exactly the
-    corresponding soft-target cross entropy, without materializing or moving a
-    vocabulary-wide teacher distribution.
+    ``distill_targets`` has shape ``hidden.shape[:-1] + [K]``.  When its K
+    targets are iid samples from a teacher distribution, their mean is an
+    unbiased lower-variance estimator of the corresponding soft-target cross
+    entropy.  The implementation shares one vocabulary-wide normalizer and
+    never materializes a dense teacher distribution.
     """
 
     primary_weight = float(primary_weight)
@@ -620,14 +672,8 @@ def tiled_tied_weighted_dual_cross_entropy_losses(
         semantic_vocab_size,
         vocab_tile_size,
     )
-    _validate_inputs(
-        hidden,
-        embedding,
-        distill_targets,
-        semantic_vocab_size,
-        vocab_tile_size,
-    )
-    return _tiled_weighted_dual_losses(
+    _validate_multi_targets(hidden, distill_targets)
+    return _tiled_weighted_multi_losses(
         hidden,
         embedding,
         primary_targets,
@@ -637,6 +683,33 @@ def tiled_tied_weighted_dual_cross_entropy_losses(
         semantic_vocab_size,
         vocab_tile_size,
         compute_dtype,
+    )
+
+
+def tiled_tied_weighted_dual_cross_entropy_losses(
+    hidden: jax.Array,
+    embedding: jax.Array,
+    primary_targets: jax.Array,
+    distill_targets: jax.Array,
+    *,
+    primary_weight: float,
+    distill_weight: float,
+    semantic_vocab_size: int,
+    vocab_tile_size: int = DEFAULT_VOCAB_TILE_SIZE,
+    compute_dtype: Any = jnp.bfloat16,
+) -> jax.Array:
+    """Backward-compatible K=1 weighted teacher loss."""
+
+    return tiled_tied_weighted_multi_cross_entropy_losses(
+        hidden,
+        embedding,
+        primary_targets,
+        distill_targets[..., None],
+        primary_weight=primary_weight,
+        distill_weight=distill_weight,
+        semantic_vocab_size=semantic_vocab_size,
+        vocab_tile_size=vocab_tile_size,
+        compute_dtype=compute_dtype,
     )
 
 
@@ -662,6 +735,34 @@ def tiled_tied_cross_entropy(
     return jnp.mean(losses, dtype=jnp.float32)
 
 
+def tiled_tied_weighted_multi_cross_entropy(
+    hidden: jax.Array,
+    embedding: jax.Array,
+    primary_targets: jax.Array,
+    distill_targets: jax.Array,
+    *,
+    primary_weight: float,
+    distill_weight: float,
+    semantic_vocab_size: int,
+    vocab_tile_size: int = DEFAULT_VOCAB_TILE_SIZE,
+    compute_dtype: Any = jnp.bfloat16,
+) -> jax.Array:
+    """Return the mean weighted K-sample teacher cross entropy in FP32."""
+
+    losses = tiled_tied_weighted_multi_cross_entropy_losses(
+        hidden,
+        embedding,
+        primary_targets,
+        distill_targets,
+        primary_weight=primary_weight,
+        distill_weight=distill_weight,
+        semantic_vocab_size=semantic_vocab_size,
+        vocab_tile_size=vocab_tile_size,
+        compute_dtype=compute_dtype,
+    )
+    return jnp.mean(losses, dtype=jnp.float32)
+
+
 def tiled_tied_weighted_dual_cross_entropy(
     hidden: jax.Array,
     embedding: jax.Array,
@@ -674,17 +775,16 @@ def tiled_tied_weighted_dual_cross_entropy(
     vocab_tile_size: int = DEFAULT_VOCAB_TILE_SIZE,
     compute_dtype: Any = jnp.bfloat16,
 ) -> jax.Array:
-    """Return the mean weighted dual-target cross entropy in FP32."""
+    """Backward-compatible mean K=1 weighted teacher loss."""
 
-    losses = tiled_tied_weighted_dual_cross_entropy_losses(
+    return tiled_tied_weighted_multi_cross_entropy(
         hidden,
         embedding,
         primary_targets,
-        distill_targets,
+        distill_targets[..., None],
         primary_weight=primary_weight,
         distill_weight=distill_weight,
         semantic_vocab_size=semantic_vocab_size,
         vocab_tile_size=vocab_tile_size,
         compute_dtype=compute_dtype,
     )
-    return jnp.mean(losses, dtype=jnp.float32)

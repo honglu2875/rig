@@ -17,6 +17,8 @@ from rig.kernels import (
     tiled_tied_cross_entropy_losses,
     tiled_tied_weighted_dual_cross_entropy,
     tiled_tied_weighted_dual_cross_entropy_losses,
+    tiled_tied_weighted_multi_cross_entropy,
+    tiled_tied_weighted_multi_cross_entropy_losses,
 )
 
 
@@ -54,6 +56,28 @@ def dense_weighted_dual_losses(
     ) + distill_weight * dense_losses(
         hidden, embedding, distill_targets, semantic_vocab_size, compute_dtype
     )
+
+
+def dense_weighted_multi_losses(
+    hidden: jax.Array,
+    embedding: jax.Array,
+    primary_targets: jax.Array,
+    distill_targets: jax.Array,
+    primary_weight: float,
+    distill_weight: float,
+    semantic_vocab_size: int,
+    compute_dtype: jnp.dtype,
+) -> jax.Array:
+    teacher_losses = jax.vmap(
+        lambda targets: dense_losses(
+            hidden, embedding, targets, semantic_vocab_size, compute_dtype
+        ),
+        in_axes=-1,
+        out_axes=-1,
+    )(distill_targets)
+    return primary_weight * dense_losses(
+        hidden, embedding, primary_targets, semantic_vocab_size, compute_dtype
+    ) + distill_weight * jnp.mean(teacher_losses, axis=-1)
 
 
 def jaxpr_shapes(value: object) -> set[tuple[int, ...]]:
@@ -211,6 +235,115 @@ class TiledTiedCrossEntropyTests(unittest.TestCase):
             compute_dtype=jnp.float32,
         )
         np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-6)
+
+    def test_weighted_multi_values_and_gradients_match_dense_sample_mean(self) -> None:
+        distill_targets = jnp.asarray(
+            [
+                [[2, 2, 5, 8], [1, 4, 1, 7], [7, 6, 0, 7]],
+                [[9, 3, 9, 1], [4, 4, 2, 10], [0, 5, 5, 0]],
+            ],
+            dtype=jnp.int32,
+        )
+
+        def tiled(hidden: jax.Array, embedding: jax.Array) -> jax.Array:
+            return tiled_tied_weighted_multi_cross_entropy(
+                hidden,
+                embedding,
+                self.targets,
+                distill_targets,
+                primary_weight=0.9,
+                distill_weight=0.1,
+                semantic_vocab_size=11,
+                vocab_tile_size=4,
+                compute_dtype=jnp.float32,
+            )
+
+        def dense(hidden: jax.Array, embedding: jax.Array) -> jax.Array:
+            return jnp.mean(
+                dense_weighted_multi_losses(
+                    hidden,
+                    embedding,
+                    self.targets,
+                    distill_targets,
+                    0.9,
+                    0.1,
+                    11,
+                    jnp.float32,
+                ),
+                dtype=jnp.float32,
+            )
+
+        expected = jax.value_and_grad(dense, argnums=(0, 1))(
+            self.hidden, self.embedding
+        )
+        actual = jax.jit(jax.value_and_grad(tiled, argnums=(0, 1)))(
+            self.hidden, self.embedding
+        )
+        np.testing.assert_allclose(actual[0], expected[0], rtol=2e-6, atol=2e-6)
+        np.testing.assert_allclose(actual[1][0], expected[1][0], rtol=3e-6, atol=3e-6)
+        np.testing.assert_allclose(actual[1][1], expected[1][1], rtol=3e-6, atol=3e-6)
+        np.testing.assert_array_equal(actual[1][1][11:], 0.0)
+
+        per_position = tiled_tied_weighted_multi_cross_entropy_losses(
+            self.hidden,
+            self.embedding,
+            self.targets,
+            distill_targets,
+            primary_weight=0.9,
+            distill_weight=0.1,
+            semantic_vocab_size=11,
+            vocab_tile_size=4,
+            compute_dtype=jnp.float32,
+        )
+        np.testing.assert_allclose(
+            per_position,
+            dense_weighted_multi_losses(
+                self.hidden,
+                self.embedding,
+                self.targets,
+                distill_targets,
+                0.9,
+                0.1,
+                11,
+                jnp.float32,
+            ),
+            rtol=2e-6,
+            atol=2e-6,
+        )
+
+    def test_weighted_multi_k1_is_identical_to_dual_target(self) -> None:
+        targets = jnp.asarray([[2, 1, 7], [9, 4, 0]], dtype=jnp.int32)
+        dual = jax.value_and_grad(
+            lambda h, e: tiled_tied_weighted_dual_cross_entropy(
+                h,
+                e,
+                self.targets,
+                targets,
+                primary_weight=0.75,
+                distill_weight=0.25,
+                semantic_vocab_size=11,
+                vocab_tile_size=4,
+                compute_dtype=jnp.float32,
+            ),
+            argnums=(0, 1),
+        )(self.hidden, self.embedding)
+        multi = jax.value_and_grad(
+            lambda h, e: tiled_tied_weighted_multi_cross_entropy(
+                h,
+                e,
+                self.targets,
+                targets[..., None],
+                primary_weight=0.75,
+                distill_weight=0.25,
+                semantic_vocab_size=11,
+                vocab_tile_size=4,
+                compute_dtype=jnp.float32,
+            ),
+            argnums=(0, 1),
+        )(self.hidden, self.embedding)
+        np.testing.assert_array_equal(multi[0], dual[0])
+        np.testing.assert_array_equal(multi[1][0], dual[1][0])
+        np.testing.assert_array_equal(multi[1][1], dual[1][1])
 
     def test_weighted_dual_rejects_invalid_weights(self) -> None:
         for primary_weight, distill_weight in ((0.0, 0.0), (-0.1, 1.1)):

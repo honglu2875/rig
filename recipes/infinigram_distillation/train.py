@@ -157,7 +157,7 @@ from rig.kernels import (
     select_attention_tiles,
     tiled_tied_cross_entropy,
     tiled_tied_cross_entropy_losses,
-    tiled_tied_weighted_dual_cross_entropy,
+    tiled_tied_weighted_multi_cross_entropy,
 )
 
 
@@ -171,6 +171,11 @@ NGRAM_PATCH_PATH = (
     RECIPE_DIR
     / "patches"
     / "0001-Add-leave-one-out-infinigram-distillation-sampler.patch"
+)
+NGRAM_K_SAMPLE_PATCH_PATH = (
+    RECIPE_DIR
+    / "patches"
+    / "0002-Add-shared-query-K-sample-leave-one-out-targets.patch"
 )
 INDEX_PROVENANCE_NAME = "provenance.json"
 DEFAULT_INFINIGRAM_MANIFEST = (
@@ -234,6 +239,7 @@ class Config:
     vocab_tile_size: int
     ground_truth_weight: float
     infinigram_weight: float
+    infinigram_samples: int
     infinigram_max_context: int
     dtype_name: str
     config_schema_version: int
@@ -670,7 +676,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--infinigram-weight",
         type=float,
         default=0.0,
-        help="coefficient b for one leave-one-out teacher sample per token",
+        help="coefficient b for leave-one-out teacher samples",
+    )
+    distill.add_argument(
+        "--infinigram-samples",
+        type=positive_int,
+        default=1,
+        help="iid teacher samples K per training-token position",
     )
     distill.add_argument(
         "--infinigram-index",
@@ -760,6 +772,7 @@ def infinigram_step_seed(run_seed: int, step: int, process_index: int) -> int:
 @dataclass(slots=True)
 class InfiniGramQueryStats:
     tokens: int = 0
+    samples: int = 0
     target_matches: int = 0
     suffix_length_sum: int = 0
     max_suffix_length: int = 0
@@ -777,8 +790,15 @@ class InfiniGramQueryStats:
     ) -> None:
         if np.any(prompt_counts <= 0):
             raise ValueError("leave-one-out teacher returned an empty distribution")
-        self.tokens += int(teacher_targets.size)
-        self.target_matches += int(np.count_nonzero(teacher_targets == ground_truth))
+        if teacher_targets.ndim != ground_truth.ndim + 1:
+            raise ValueError("teacher targets must have one trailing sample dimension")
+        if teacher_targets.shape[:-1] != ground_truth.shape:
+            raise ValueError("teacher targets must align with ground-truth positions")
+        self.tokens += int(ground_truth.size)
+        self.samples += int(teacher_targets.size)
+        self.target_matches += int(
+            np.count_nonzero(teacher_targets == ground_truth[..., None])
+        )
         self.suffix_length_sum += int(np.asarray(suffix_lengths, dtype=np.int64).sum())
         self.max_suffix_length = max(
             self.max_suffix_length, int(np.asarray(suffix_lengths).max(initial=0))
@@ -799,6 +819,7 @@ def summarize_infinigram_query_stats(
     values = np.asarray(
         [
             local.tokens,
+            local.samples,
             local.target_matches,
             local.suffix_length_sum,
             local.max_suffix_length,
@@ -815,16 +836,22 @@ def summarize_infinigram_query_stats(
     tokens = int(np.sum(gathered[:, 0]))
     if tokens <= 0:
         raise ValueError("enabled infinigram teacher recorded no query tokens")
-    critical_seconds = float(np.max(gathered[:, 5]))
+    samples = int(np.sum(gathered[:, 1]))
+    critical_seconds = float(np.max(gathered[:, 6]))
     return {
         "query_tokens": tokens,
-        "sample_matches_ground_truth_rate": float(np.sum(gathered[:, 1]) / tokens),
-        "mean_suffix_length": float(np.sum(gathered[:, 2]) / tokens),
-        "max_suffix_length": int(np.max(gathered[:, 3])),
-        "mean_ground_truth_probability": float(np.sum(gathered[:, 4]) / tokens),
+        "teacher_samples": samples,
+        "samples_per_position": float(samples / tokens),
+        "sample_matches_ground_truth_rate": float(np.sum(gathered[:, 2]) / samples),
+        "mean_suffix_length": float(np.sum(gathered[:, 3]) / tokens),
+        "max_suffix_length": int(np.max(gathered[:, 4])),
+        "mean_ground_truth_probability": float(np.sum(gathered[:, 5]) / tokens),
         "critical_path_query_seconds": critical_seconds,
         "global_query_tokens_per_second": float(
             tokens / max(critical_seconds, 1.0e-12)
+        ),
+        "global_teacher_samples_per_second": float(
+            samples / max(critical_seconds, 1.0e-12)
         ),
     }
 
@@ -854,6 +881,10 @@ def validate_args(
     if infinigram_weight == 0.0 and args.infinigram_max_context is not None:
         raise ValueError(
             "--infinigram-max-context has no effect when --infinigram-weight is zero"
+        )
+    if infinigram_weight == 0.0 and args.infinigram_samples != 1:
+        raise ValueError(
+            "--infinigram-samples has no effect when --infinigram-weight is zero"
         )
     validate_standard_data_arguments(args)
     validate_standard_reporting_arguments(args)
@@ -1047,6 +1078,7 @@ def resolve_config(
         vocab_tile_size=kernels.vocab_tile_size,
         ground_truth_weight=ground_truth_weight,
         infinigram_weight=infinigram_weight,
+        infinigram_samples=args.infinigram_samples,
         infinigram_max_context=args.infinigram_max_context or 0,
         dtype_name=dtype_name,
         config_schema_version=experiment_config.schema_version,
@@ -1070,6 +1102,7 @@ def load_infinigram_teacher(
     index_path = args.infinigram_index.expanduser().resolve()
     manifest_path = args.infinigram_manifest.expanduser().resolve()
     patch_sha256 = file_sha256(NGRAM_PATCH_PATH)
+    k_sample_patch_sha256 = file_sha256(NGRAM_K_SAMPLE_PATCH_PATH)
     manifest_sha256 = file_sha256(manifest_path)
     manifest = read_json_object(manifest_path, "dataset manifest")
     files = manifest.get("files")
@@ -1131,8 +1164,8 @@ def load_infinigram_teacher(
     teacher = ngram.InfiniGram(
         str(index_path), threads=args.infinigram_threads, load_tokenizer=False
     )
-    if not hasattr(teacher, "infgram_loo_sample_batch"):
-        raise RuntimeError("installed ngram package lacks the leave-one-out sampler")
+    if not hasattr(teacher, "infgram_loo_sample_k_batch"):
+        raise RuntimeError("installed ngram package lacks the K-sample leave-one-out sampler")
     if teacher.config.tokenizer != "gpt2":
         raise ValueError(
             f"infinigram index tokenizer must be 'gpt2', got {teacher.config.tokenizer!r}"
@@ -1152,11 +1185,13 @@ def load_infinigram_teacher(
         )
     runtime = {
         "enabled": True,
-        "objective": "leave_one_occurrence_out_sampled_cross_entropy_v1",
+        "objective": "leave_one_occurrence_out_k_sample_cross_entropy_v2",
         "ground_truth_weight": config.ground_truth_weight,
         "infinigram_weight": config.infinigram_weight,
+        "samples_per_position": config.infinigram_samples,
         "max_context": config.infinigram_max_context,
         "sample_seed": "splitmix64(run_seed,step,process_index)_v1",
+        "sample_stream": "iid_with_replacement_nested_prefixes_v1",
         "index_path": str(index_path),
         "index_config_sha256": file_sha256(index_path / "config.json"),
         "index_provenance_sha256": file_sha256(provenance_path),
@@ -1170,6 +1205,7 @@ def load_infinigram_teacher(
         "ngram_upstream_repository": NGRAM_UPSTREAM_REPOSITORY,
         "ngram_upstream_revision": NGRAM_UPSTREAM_REVISION,
         "ngram_patch_sha256": patch_sha256,
+        "ngram_k_sample_patch_sha256": k_sample_patch_sha256,
         "ngram_extension_sha256": file_sha256(Path(ngram_core.__file__)),
         "ngram_index_py_sha256": file_sha256(Path(ngram_index.__file__)),
     }
@@ -1280,10 +1316,11 @@ def experiment_config_metadata(config: Config) -> dict[str, Any]:
                 "name": (
                     "ground_truth_cross_entropy"
                     if config.infinigram_weight == 0.0
-                    else "ground_truth_plus_sampled_leave_one_out_infinigram"
+                    else "ground_truth_plus_k_sample_leave_one_out_infinigram"
                 ),
                 "ground_truth_weight": config.ground_truth_weight,
                 "infinigram_weight": config.infinigram_weight,
+                "infinigram_samples": config.infinigram_samples,
                 "infinigram_max_context": config.infinigram_max_context,
             },
             "optimizer": {
@@ -1400,6 +1437,7 @@ def checkpoint_metadata(
         "objective": {
             "ground_truth_weight": config.ground_truth_weight,
             "infinigram_weight": config.infinigram_weight,
+            "infinigram_samples": config.infinigram_samples,
             "infinigram_max_context": config.infinigram_max_context,
         },
     }
@@ -1427,6 +1465,7 @@ def implementation_metadata(
                 "enabled": False,
                 "ground_truth_weight": config.ground_truth_weight,
                 "infinigram_weight": config.infinigram_weight,
+                "samples_per_position": config.infinigram_samples,
             }
         ),
         "configuration": experiment_config_metadata(config),
@@ -1541,11 +1580,19 @@ def cross_entropy(
 ) -> jax.Array:
     if config.infinigram_weight > 0.0 and distill_targets is None:
         raise ValueError("distill_targets are required for an infinigram objective")
+    if distill_targets is not None and distill_targets.shape != (
+        *y.shape,
+        config.infinigram_samples,
+    ):
+        raise ValueError(
+            "distill_targets must have shape ground_truth.shape + "
+            f"[{config.infinigram_samples}]; got {distill_targets.shape}"
+        )
     if config.loss_backend == "tiled":
         hidden = gpt_hidden(params, x, config, attention_fn)
         if config.infinigram_weight > 0.0:
             assert distill_targets is not None
-            return tiled_tied_weighted_dual_cross_entropy(
+            return tiled_tied_weighted_multi_cross_entropy(
                 hidden,
                 params.get("output_embedding", params["token_embedding"]),
                 y,
@@ -1574,12 +1621,18 @@ def cross_entropy(
     if config.infinigram_weight == 0.0:
         return -jnp.mean(selected_ground_truth, dtype=jnp.float32)
     assert distill_targets is not None
-    selected_distill = jnp.take_along_axis(
-        log_probabilities, distill_targets[..., None], axis=-1
+    samples_per_position = distill_targets.shape[-1]
+    flat_log_probabilities = log_probabilities.reshape(
+        (-1, config.semantic_vocab_size)
     )
+    selected_distill = jnp.take_along_axis(
+        flat_log_probabilities,
+        distill_targets.reshape((-1, samples_per_position)),
+        axis=-1,
+    ).reshape(y.shape + (samples_per_position,))
     losses = -(
-        config.ground_truth_weight * selected_ground_truth
-        + config.infinigram_weight * selected_distill
+        config.ground_truth_weight * selected_ground_truth[..., 0]
+        + config.infinigram_weight * jnp.mean(selected_distill, axis=-1)
     )
     return jnp.mean(losses, dtype=jnp.float32)
 
@@ -1950,7 +2003,7 @@ def traced_flops(config: Config, params: Mapping[str, Any]) -> FlopBreakdown:
     tokens = jnp.zeros((1, config.seq_len), jnp.int32)
     targets = jnp.zeros((1, config.seq_len), jnp.int32)
     distill_targets = (
-        jnp.zeros((1, config.seq_len), jnp.int32)
+        jnp.zeros((1, config.seq_len, config.infinigram_samples), jnp.int32)
         if config.infinigram_weight > 0.0
         else None
     )
@@ -2129,7 +2182,8 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     if config.infinigram_weight == 0.0
                     else (
                         f"{config.ground_truth_weight:g}·CE(ground truth) + "
-                        f"{config.infinigram_weight:g}·CE(LOO infinigram sample)"
+                        f"{config.infinigram_weight:g}·CE(LOO infinigram, "
+                        f"K={config.infinigram_samples})"
                     )
                 ),
             ),
@@ -2162,6 +2216,7 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
     mesh = Mesh(np.asarray(devices, dtype=object), ("data",))
     replicated = NamedSharding(mesh, P())
     data_sharding = NamedSharding(mesh, P("data", None))
+    distill_sharding = NamedSharding(mesh, P("data", None, None))
     attention_fn = make_mesh_attention(
         backend=config.attention_backend,
         mesh=mesh,
@@ -2187,10 +2242,13 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
     )
     sample_distill = (
         put_host_local_array(
-            np.zeros((local_batch, config.seq_len), dtype=np.int32),
+            np.zeros(
+                (local_batch, config.seq_len, config.infinigram_samples),
+                dtype=np.int32,
+            ),
             mesh,
-            P("data", None),
-            data_sharding,
+            P("data", None, None),
+            distill_sharding,
             process_count,
         )
         if infinigram_teacher is not None
@@ -2224,7 +2282,7 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                 replicated,
                 data_sharding,
                 data_sharding,
-                data_sharding,
+                distill_sharding,
             ),
             donate_argnums=(0, 1),
         )
@@ -2270,7 +2328,7 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     replicated,
                     data_sharding,
                     data_sharding,
-                    data_sharding,
+                    distill_sharding,
                 ),
                 donate_argnums=(0, 1),
             ).lower(params, optimizer, sample_x, sample_y, sample_distill)
@@ -2418,9 +2476,10 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                         suffix_lengths,
                         prompt_counts,
                         target_counts,
-                    ) = infinigram_teacher.infgram_loo_sample_batch(
+                    ) = infinigram_teacher.infgram_loo_sample_k_batch(
                         batch_x_host,
                         batch_y_host,
+                        num_samples=config.infinigram_samples,
                         seed=infinigram_step_seed(
                             args.seed, step_index, process_index
                         ),
@@ -2442,8 +2501,8 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
                     batch_distill = put_host_local_array(
                         teacher_targets,
                         mesh,
-                        P("data", None),
-                        data_sharding,
+                        P("data", None, None),
+                        distill_sharding,
                         process_count,
                     )
                 batch_x = put_host_local_array(
@@ -2877,6 +2936,7 @@ def run(args: argparse.Namespace) -> dict[str, Any] | None:
             "train_loss": train_loss,
             "ground_truth_weight": float(config.ground_truth_weight),
             "infinigram_weight": float(config.infinigram_weight),
+            "infinigram_samples": int(config.infinigram_samples),
             "infinigram_max_context": int(config.infinigram_max_context),
             "infinigram_query": infinigram_query_summary,
             "parameters": int(params_total),

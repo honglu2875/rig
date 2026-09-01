@@ -48,6 +48,7 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
         config = resolved()
         self.assertEqual(config.ground_truth_weight, 1.0)
         self.assertEqual(config.infinigram_weight, 0.0)
+        self.assertEqual(config.infinigram_samples, 1)
         self.assertEqual(config.infinigram_max_context, 0)
         validate_recipe_plan(trainer.resolved_plan_metadata(config))
 
@@ -58,11 +59,14 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
             "0.25",
             "--infinigram-index",
             "/index/not-opened-during-plan-resolution",
+            "--infinigram-samples",
+            "32",
             "--infinigram-max-context",
             "64",
         )
         self.assertEqual(config.ground_truth_weight, 0.75)
         self.assertEqual(config.infinigram_weight, 0.25)
+        self.assertEqual(config.infinigram_samples, 32)
         self.assertEqual(config.infinigram_max_context, 64)
         validate_recipe_plan(trainer.resolved_plan_metadata(config))
 
@@ -71,6 +75,7 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
         document, _ = trainer.load_experiment_config("smoke")
         cases = (
             ["--profile", "smoke", "--infinigram-weight", "0.25"],
+            ["--profile", "smoke", "--infinigram-samples", "16"],
             [
                 "--profile",
                 "smoke",
@@ -89,7 +94,10 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
     def test_dense_treatment_value_and_gradients_equal_two_cross_entropies(self) -> None:
         baseline = resolved()
         treatment = replace(
-            baseline, ground_truth_weight=0.75, infinigram_weight=0.25
+            baseline,
+            ground_truth_weight=0.75,
+            infinigram_weight=0.25,
+            infinigram_samples=4,
         )
         params = jax.tree_util.tree_map(jnp.asarray, trainer.init_params(baseline, 7))
         positions = jnp.arange(
@@ -97,7 +105,13 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
         ).reshape((baseline.batch_size, baseline.seq_len))
         x = positions % baseline.semantic_vocab_size
         y = (positions + 1) % baseline.semantic_vocab_size
-        teacher_y = (positions * 7 + 3) % baseline.semantic_vocab_size
+        teacher_y = jnp.stack(
+            [
+                (positions * multiplier + offset) % baseline.semantic_vocab_size
+                for multiplier, offset in ((7, 3), (5, 2), (3, 4), (11, 1))
+            ],
+            axis=-1,
+        )
 
         def actual(candidate):
             return trainer.cross_entropy(
@@ -111,8 +125,13 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
         def expected(candidate):
             return 0.75 * trainer.cross_entropy(
                 candidate, x, y, baseline
-            ) + 0.25 * trainer.cross_entropy(
-                candidate, x, teacher_y, baseline
+            ) + 0.25 * jnp.mean(
+                jnp.stack(
+                    [
+                        trainer.cross_entropy(candidate, x, teacher_y[..., sample], baseline)
+                        for sample in range(teacher_y.shape[-1])
+                    ]
+                )
             )
 
         actual_value, actual_grad = jax.value_and_grad(actual)(params)
@@ -132,6 +151,30 @@ class InfiniGramDistillationRecipeTests(unittest.TestCase):
         self.assertEqual(seed, trainer.infinigram_step_seed(17, 23, 2))
         self.assertNotEqual(seed, trainer.infinigram_step_seed(17, 24, 2))
         self.assertNotEqual(seed, trainer.infinigram_step_seed(17, 23, 3))
+
+    def test_query_stats_distinguish_positions_from_teacher_samples(self) -> None:
+        stats = trainer.InfiniGramQueryStats()
+        ground_truth = np.asarray([[1, 2], [3, 4]], dtype=np.int32)
+        teacher = np.asarray(
+            [
+                [[1, 7, 8], [2, 2, 9]],
+                [[0, 3, 3], [4, 5, 6]],
+            ],
+            dtype=np.int32,
+        )
+        stats.add(
+            teacher,
+            ground_truth,
+            np.asarray([[2, 3], [4, 5]], dtype=np.uint32),
+            np.full((2, 2), 10, dtype=np.uint64),
+            np.asarray([[3, 2], [1, 4]], dtype=np.uint64),
+            0.25,
+        )
+        summary = trainer.summarize_infinigram_query_stats(stats, process_count=1)
+        self.assertEqual(summary["query_tokens"], 4)
+        self.assertEqual(summary["teacher_samples"], 12)
+        self.assertEqual(summary["samples_per_position"], 3.0)
+        self.assertAlmostEqual(summary["sample_matches_ground_truth_rate"], 6 / 12)
 
 
 if __name__ == "__main__":  # pragma: no cover

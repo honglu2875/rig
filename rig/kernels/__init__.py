@@ -11,6 +11,8 @@ from .linear_cross_entropy import (
     tiled_tied_cross_entropy_losses,
     tiled_tied_weighted_dual_cross_entropy,
     tiled_tied_weighted_dual_cross_entropy_losses,
+    tiled_tied_weighted_multi_cross_entropy,
+    tiled_tied_weighted_multi_cross_entropy_losses,
 )
 from .double_fuzzy_topk import (
     DoubleFuzzyTopKCallable,
@@ -90,5 +92,7 @@ __all__ = (
     "tiled_tied_cross_entropy_losses",
     "tiled_tied_weighted_dual_cross_entropy",
     "tiled_tied_weighted_dual_cross_entropy_losses",
+    "tiled_tied_weighted_multi_cross_entropy",
+    "tiled_tied_weighted_multi_cross_entropy_losses",
     "topk_relu",
 )

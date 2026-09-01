@@ -14,22 +14,27 @@ we tune the mixture. The default is `a=1, b=0`; passing
 `--ground-truth-weight` is accepted only when the two coefficients sum to one.
 
 The infinigram distribution is not transferred as a 50,257-wide vector. For
-every training token, a host-side suffix-array query samples one continuation
-`t ~ P_infini(. | context)`. Then
+every training token, a host-side suffix-array query draws `K` continuations
+with replacement, `t_j ~ P_infini(. | context)`. Then
 
 ```text
-E_t[-log P_model(t | context)] = CE(P_infini, P_model),
+E_t[-1/K sum_j log P_model(t_j | context)] = CE(P_infini, P_model),
 ```
 
-so one hard target is an unbiased Monte Carlo estimator of the full teacher
-cross-entropy. The tiled output head computes the shared log-normalizer once:
+so their average is an unbiased Monte Carlo estimator of the full teacher
+cross-entropy, with sampling variance decreasing approximately as `1/K`. The
+sampler performs the suffix search and continuation count once per position;
+only the cheap draws repeat. The tiled output head also computes the shared
+log-normalizer once:
 
 ```text
-(a + b) * logsumexp(logits) - a * logits[y] - b * logits[t]
+(a + b) * logsumexp(logits) - a * logits[y]
+    - (b/K) * sum_j logits[t_j]
 ```
 
-It neither materializes teacher logits nor repeats the output projection.
-Canonical validation remains ground-truth-only.
+It neither materializes teacher logits nor repeats the vocabulary-wide output
+projection. `--infinigram-samples` selects K and defaults to 1 for exact
+backward compatibility. Canonical validation remains ground-truth-only.
 
 ## Why leave one occurrence out
 
@@ -57,13 +62,16 @@ install it into the rig environment:
 git clone https://github.com/honglu2875/ngram /tmp/ngram
 git -C /tmp/ngram checkout 2a73b5ffbe852718dbd4e01ee6abafeb1628c5a7
 git -C /tmp/ngram am "$PWD/recipes/infinigram_distillation/patches/0001-Add-leave-one-out-infinigram-distillation-sampler.patch"
+git -C /tmp/ngram am "$PWD/recipes/infinigram_distillation/patches/0002-Add-shared-query-K-sample-leave-one-out-targets.patch"
 uv pip install --python .venv/bin/python --editable /tmp/ngram
 ```
 
-The patch adds the batched leave-one-out sampler and removes optional tokenizer
-imports from token-ID-only build/query paths. Its 67-test upstream suite passes.
-Every training result records the patch, Python wrapper, and compiled extension
-SHA-256 digests.
+The first patch adds the batched leave-one-out sampler and removes optional
+tokenizer imports from token-ID-only build/query paths. The second adds K draws
+per shared query while retaining the original one-sample API. Its 69-test
+upstream suite passes. Every training result records both patches, the Python
+wrapper, and compiled extension SHA-256 digests. Existing indexes remain valid:
+the second patch changes querying, not the on-disk format or builder.
 
 ## Build and query the 8B index
 
@@ -96,7 +104,7 @@ Inspect it or query a GPT-2 token-id context without loading a tokenizer:
 Training refuses an incomplete/unattested index, the wrong dataset manifest,
 wrong shard inventory, tokenizer, boundary token, vocabulary, or token count.
 
-## Initial coefficient study
+## Coefficient and sample-count studies
 
 Use the 125M, 8k-context, 5-TPP setting to screen `b in {0.10, 0.25, 0.50}`
 at seed 1337 against the existing exact dense control. Then run seeds 1338 and
@@ -105,19 +113,29 @@ without spending nine treatment runs before we know its useful range. A final
 20-TPP single-seed treatment can compare with the existing 125M hero only after
 the development sweep selects `b`.
 
+That K=1 screen selected `b=0.10` among the treatment settings, while larger
+teacher weights were progressively worse and no K=1 treatment beat the dense
+control. The variance-reduction follow-up therefore uses the paired grid
+`b in {0.025, 0.05, 0.10}` by `K in {16, 32, 64}` at seed 1337. For a fixed
+run seed, the K=16 samples are the prefix of K=32 and K=64, reducing irrelevant
+Monte Carlo differences between columns. This grid tests whether the prior
+teacher signal was too noisy while concentrating weight below the best K=1
+coefficient. It reuses the completed dense and K=1 controls.
+
 ```bash
 uv run --frozen --no-sync rig run infinigram_distillation \
   --profile dev --tier 125m --context 8k --tokens-per-parameter 5 --seed 1337 \
   --name infinigram-b025-s1337 --checkpoint-policy none -- \
   --infinigram-weight 0.25 \
+  --infinigram-samples 32 \
   --infinigram-index /home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1 \
   --infinigram-threads 30
 ```
 
-Besides ordinary losses and throughput, `metrics.json` records query rate,
-query critical-path seconds, matching suffix lengths, the adjusted teacher
-probability of the ground-truth token, and how often the sampled teacher target
-equals ground truth.
+Besides ordinary losses and throughput, `metrics.json` records position-query
+and teacher-sample rates separately, query critical-path seconds, matching
+suffix lengths, the adjusted teacher probability of the ground-truth token,
+and how often sampled teacher targets equal ground truth.
 
 ## Dense model family
 
