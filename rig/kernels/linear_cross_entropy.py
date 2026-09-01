@@ -530,18 +530,37 @@ def _tiled_weighted_multi_losses_bwd(
         )
         primary_mass = flat_primary[:, None] == vocabulary_ids[None, :]
 
-        # Count the K sparse target ids directly into this vocabulary tile.
-        # Integer addition makes duplicate targets deterministic, while one
-        # [positions, K] scatter avoids rereading a full [positions, tile]
-        # accumulator K times. Invalid local ids are clipped only for the
-        # scatter address and contribute an exactly-zero update.
-        local_targets = flat_distill - start
-        in_tile = (local_targets >= 0) & (local_targets < vocab_tile_size)
-        safe_local_targets = jnp.clip(local_targets, 0, vocab_tile_size - 1)
-        row_ids = jnp.arange(flat_hidden.shape[0], dtype=jnp.int32)[:, None]
-        distill_counts = jnp.zeros(
-            probabilities.shape, dtype=jnp.int32
-        ).at[row_ids, safe_local_targets].add(in_tile.astype(jnp.int32))
+        # Compare a bounded static chunk of samples at once and immediately
+        # reduce it into integer counts. This keeps duplicate handling exact,
+        # cuts full-tile accumulator traffic by up to 8x, and bounds the live
+        # comparison temporary independently of K.
+        sample_chunk_size = min(samples_per_position, 8)
+        sample_chunk_count = (
+            samples_per_position + sample_chunk_size - 1
+        ) // sample_chunk_size
+        padded_sample_count = sample_chunk_count * sample_chunk_size
+        padded_distill = jnp.pad(
+            flat_distill,
+            ((0, 0), (0, padded_sample_count - samples_per_position)),
+            constant_values=-1,
+        )
+
+        def add_sample_chunk(chunk_index: jax.Array, counts: jax.Array) -> jax.Array:
+            chunk = jax.lax.dynamic_slice_in_dim(
+                padded_distill,
+                chunk_index * sample_chunk_size,
+                sample_chunk_size,
+                axis=1,
+            )
+            matches = chunk[:, :, None] == vocabulary_ids[None, None, :]
+            return counts + jnp.sum(matches, axis=1, dtype=jnp.int32)
+
+        distill_counts = jax.lax.fori_loop(
+            0,
+            sample_chunk_count,
+            add_sample_chunk,
+            jnp.zeros(probabilities.shape, dtype=jnp.int32),
+        )
         distill_mass = distill_counts.astype(jnp.float32) / float(
             samples_per_position
         )
