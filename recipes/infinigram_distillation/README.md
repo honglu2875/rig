@@ -137,6 +137,29 @@ produced byte-identical training and diagnostic logs. The frozen launch
 contract is in
 [`study-k-sample-grid-125m-v1.json`](study-k-sample-grid-125m-v1.json).
 
+All nine K-by-weight cells completed at 5 TPP. Canonical validation loss was:
+
+| teacher samples K | b=0.025 | b=0.05 | b=0.10 | full-run throughput |
+|---:|---:|---:|---:|---:|
+| 16 | **3.653455** | 3.670624 | 3.707323 | 701–703k token/s |
+| 32 | 3.665286 | 3.696929 | 3.749261 | 669–672k token/s |
+| 64 | 3.673222 | 3.706025 | 3.761992 | 620–622k token/s |
+
+The paired dense seed-1337 control is 3.641529. The best new cell, K=16 and
+b=0.025, is 0.011926 nats worse. At every measured teacher weight, increasing
+K worsened the endpoint; at every K, increasing teacher weight also worsened
+it. The denser Monte Carlo estimate therefore did not rescue this teacher
+objective. The prior K=1, b=0.10 endpoint of 3.641004 is only 0.000525 below
+the paired dense run, far inside the dense three-seed spread and not evidence
+of an improvement.
+
+The next controlled follow-up fixes K=16 and asks whether its lower-variance
+teacher correction prefers a higher learning rate. It crosses the same three
+teacher weights with 1.25x, 1.5x, and 2x the 2^-8 base-LR anchor, while reusing
+the completed 1x row. The resulting 4-by-3 surface changes no other training
+field. Its frozen contract is in
+[`study-k16-learning-rate-grid-125m-v1.json`](study-k16-learning-rate-grid-125m-v1.json).
+
 ```bash
 uv run --frozen --no-sync rig run infinigram_distillation \
   --profile dev --tier 125m --context 8k --tokens-per-parameter 5 --seed 1337 \

@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "study_id": "infinigram-k16-learning-rate-grid-125m",
+  "status": "launch_contract_frozen_9_new_runs",
+  "objective": "Test whether K=16 infinigram distillation prefers a higher optimizer learning rate than the dense-family 2^-8 base-LR anchor.",
+  "hypothesis": "Averaging 16 teacher draws reduces the stochasticity of the infinigram target correction; a moderately higher learning rate may use that lower-variance signal more effectively.",
+  "common": {
+    "recipe": "infinigram_distillation",
+    "profile": "dev",
+    "tier": "125m",
+    "context": "8k",
+    "seed": 1337,
+    "tokens_per_parameter": 5,
+    "schedule_steps": 4709,
+    "planned_tokens": 617218048,
+    "batch_size": 16,
+    "sequence_length": 8192,
+    "tokens_per_step": 131072,
+    "infinigram_samples": 16,
+    "checkpoint_policy": "none",
+    "cluster": "v4-32",
+    "accelerator": "TPU v4",
+    "tpu_vm_count": 4,
+    "chips_per_host": 4,
+    "dataset_id": "fineweb-8b-gpt2",
+    "index_path": "/home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1",
+    "index_tokens": 7900000000,
+    "query_threads_per_host": 30
+  },
+  "objective_definition": {
+    "formula": "(1 - b) * CE(ground_truth, model) + b * mean_j CE(sample_j, model)",
+    "sampling": "16 iid draws with replacement from the exact leave-one-occurrence-out infinite-gram distribution at each position",
+    "validation": "Canonical validation is ground-truth cross-entropy only."
+  },
+  "grid": {
+    "infinigram_weights": [
+      0.025,
+      0.05,
+      0.1
+    ],
+    "base_learning_rates": [
+      0.00390625,
+      0.0048828125,
+      0.005859375,
+      0.0078125
+    ],
+    "learning_rate_multipliers": [
+      1.0,
+      1.25,
+      1.5,
+      2.0
+    ],
+    "cells": 12,
+    "reused_cells": 3,
+    "new_cells": 9,
+    "replicates_per_cell": 1,
+    "selection_rule": "Run every new cell to the complete 5-TPP endpoint; rank by canonical validation loss and compare paired seed-1337 cells with the reused 1.0x K=16 row and dense control."
+  },
+  "reused_controls": {
+    "dense_seed_1337": {
+      "run_id": "20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb",
+      "validation_loss": 3.641529,
+      "status": "sealed_complete_verified"
+    },
+    "k16_lr_1.0x": {
+      "b_0.025": {
+        "run_id": "20260901T094738.933157Z-infinigram_distillation-ksgrid-k16-b0025-s1337-01f16336",
+        "validation_loss": 3.653455078601837,
+        "tokens_per_second": 701472.4581411246
+      },
+      "b_0.05": {
+        "run_id": "20260901T100440.468330Z-infinigram_distillation-ksgrid-k16-b0050-s1337-8c2d152f",
+        "validation_loss": 3.6706235110759735,
+        "tokens_per_second": 703111.5284142233
+      },
+      "b_0.10": {
+        "run_id": "20260901T102144.543909Z-infinigram_distillation-ksgrid-k16-b0100-s1337-8f94b71e",
+        "validation_loss": 3.7073234021663666,
+        "tokens_per_second": 701839.4104649948
+      }
+    }
+  },
+  "new_cells": [
+    {"point": "lr125-b0025", "base_learning_rate": 0.0048828125, "learning_rate_multiplier": 1.25, "infinigram_weight": 0.025},
+    {"point": "lr125-b0050", "base_learning_rate": 0.0048828125, "learning_rate_multiplier": 1.25, "infinigram_weight": 0.05},
+    {"point": "lr125-b0100", "base_learning_rate": 0.0048828125, "learning_rate_multiplier": 1.25, "infinigram_weight": 0.1},
+    {"point": "lr150-b0025", "base_learning_rate": 0.005859375, "learning_rate_multiplier": 1.5, "infinigram_weight": 0.025},
+    {"point": "lr150-b0050", "base_learning_rate": 0.005859375, "learning_rate_multiplier": 1.5, "infinigram_weight": 0.05},
+    {"point": "lr150-b0100", "base_learning_rate": 0.005859375, "learning_rate_multiplier": 1.5, "infinigram_weight": 0.1},
+    {"point": "lr200-b0025", "base_learning_rate": 0.0078125, "learning_rate_multiplier": 2.0, "infinigram_weight": 0.025},
+    {"point": "lr200-b0050", "base_learning_rate": 0.0078125, "learning_rate_multiplier": 2.0, "infinigram_weight": 0.05},
+    {"point": "lr200-b0100", "base_learning_rate": 0.0078125, "learning_rate_multiplier": 2.0, "infinigram_weight": 0.1}
+  ],
+  "systems_gate": {
+    "status": "reused",
+    "basis": "Learning rate changes no tensor shape, compilation path, teacher-query load, or K=16 memory requirement. The completed K=16 full runs sustained 701-703k token/s and fit comfortably on v4-32.",
+    "high_lr_safety": "The 2x endpoint is the previously exercised 2^-7 family learning rate. Gradient clipping remains disabled, so gradient norms and finite-loss checks remain part of the ordinary run diagnostics."
+  },
+  "source_contract": {
+    "git_commit_before_protocol": "d1f6e0e4529af5a52f0a1f8e4cf86ae8ae7c5006",
+    "train_py_sha256": "ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12",
+    "dev_config_sha256": "fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f",
+    "linear_cross_entropy_sha256": "91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92",
+    "ngram_base_patch_sha256": "207ea29cc3b2a8f2c740034ad8e1b9b428380ecd2bb54b2e64b067fd48e7072b",
+    "ngram_k_sample_patch_sha256": "2fb075ba5536e79abcb0fca63e147551629448c1dd641291edc26ac18eafe015",
+    "ngram_extension_sha256": "0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925",
+    "dataset_manifest_sha256": "d77eb50e311bd36b8a3fc3ec4da4c71c6b200c308167a3afcb3a27f75a430d52"
+  },
+  "launch_policy": "Launch the nine new cells sequentially in increasing learning-rate multiplier, then increasing b. Do not select, retry, or stop based on intermediate quality observations.",
+  "stopping_rule": "Every cell runs through all 4709 optimizer steps. A systems or non-finite failure stops the queue for inspection; a merely poor scientific outcome does not."
+}
