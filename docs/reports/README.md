@@ -8,8 +8,10 @@ exact.
 ## The logs live on HuggingFace
 
 **[huggingface.co/datasets/quintic/rig-logs](https://huggingface.co/datasets/quintic/rig-logs)**
-— 463 runs across twenty studies, laid out as `<study>/<run-name>/`, at full
-recorded resolution. That is the archive of record; its
+— 552 archived run folders representing 545 unique run IDs across 24 studies,
+laid out as `<study>/<run-name>/`, at full recorded resolution. Seven exact
+controls are repeated so that the studies which use them remain self-contained.
+That is the archive of record; its
 [dataset card](https://huggingface.co/datasets/quintic/rig-logs/blob/main/README.md)
 mirrors this catalog and adds archive and reproduction metadata.
 
@@ -55,6 +57,8 @@ by-product:
 | sparse-autoencoder-eqflop | exact endpoints + compute derivation | — | 0.02 MB |
 | fuzzy-topk-three-arm-ladder | exact endpoints + paired-seed/compute tables | — | 0.03 MB |
 | fuzzy-topk-sparsity-diagnostics | exact mechanism reductions + 40.19 GiB raw vectors | — | 0.02 MB |
+| fuzzy-topk-reconstruction | exact endpoints; expanded browser payload capped at 2,048 points | 32 | 0.04 MB |
+| infinigram-distillation | exact endpoints + implementation/provenance audit; expanded payload capped at 2,048 points | 32 | 0.05 MB |
 
 The two large ones carry layer detail because gradient spikes are visible in
 it, and studying them is the point. This is deliberate discretion, not a
@@ -124,6 +128,14 @@ competition. The study browser carries the one-off interactive distributions:
 dead-layer heatmaps, activation-frequency ridgelines, a draggable-step
 histogram, and positive-frequency quantiles.
 
+`infinigram-distillation.html` is a static, reproducibility-led report over 24
+complete runs at 8k context. It specifies the 7.9B-token suffix-array teacher,
+exact leave-one-out rule, counter-based sampling, mixed cross-entropy and fused
+student gradient, source identities, matched contracts, every endpoint, and
+all engineering-only exclusions. Its 49 KiB page has no runtime JavaScript or
+embedded raw logs. The study-browser payload is deliberately bounded; the raw
+logs and 24-line ledger remain exact.
+
 Which metrics get charted is a declared list in `rig/report.py`, separate from
 the metric registry, because how a quantity should be drawn is a judgement the
 registry cannot make. Ordinary report metrics remain lines against time or
@@ -135,7 +147,7 @@ views rather than bending a distribution into a scalar timeline.
 ## The study browser
 
 [`study-browser.html`](study-browser.html) carries no run data at all — about
-80 KB. It
+81 KB. It
 lists the studies, renders each one's card from the dataset, and fetches only
 that study's overview (0.05–1.1 MB) when you pick one. Each study always links
 to its raw files on Hugging Face. A second, separately labelled click loads the
@@ -144,10 +156,13 @@ it starts: 6.4 MB for the 8k sweep, 138 MB for the 500M one. Nothing downloads
 on load.
 
 Every study export publishes both browser views: a compact overview snapshot
-and an explicitly loaded `full.json.gz` containing every recorded point. The
-raw `.riglog` files remain the archive of record. Every report payload the
-browser fetches is ordinary JSON, so the page never needs to understand the
-packed log format.
+and an explicitly loaded `full.json.gz`. Most historical expanded payloads
+contain every recorded point. The fuzzy-reconstruction and infinigram studies
+instead cap each curve at 2,048 points and each layer metric at 32 time frames;
+the picker labels those limits before downloading. Their raw `.riglog` files
+remain the archive of record at full fidelity. Every report payload the browser
+fetches is ordinary JSON, so the page never needs to understand the packed log
+format.
 
 The run selector can save either a self-contained HTML report for the visible
 runs or a `.tar.gz` containing their original training and diagnostic
@@ -206,6 +221,10 @@ The fuzzy TopK sparsity-diagnostics study likewise uses TPU v4 at 4 processes
 and 16 chips for all twelve runs, spanning 60M through 500M without crossing a
 topology boundary.
 
+The infinigram study also uses TPU v4 at 4 processes and 16 chips for all 23
+new runs; its imported 125M dense control used that same topology. The 500M
+hero pair is a same-seed, same-binary comparison on the same allocation.
+
 ## Contents
 
 | report | runs | tier(s) | what varies | logs |
@@ -227,13 +246,17 @@ topology boundary.
 | [sparse-autoencoder-eqflop](sparse-autoencoder-eqflop.html) | 13 | 60M geometry | dictionary width × retained width at equal algorithmic FLOPs | [`sparse-autoencoder-eqflop-60M`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/sparse-autoencoder-eqflop-60M) |
 | [fuzzy-topk-three-arm-ladder](fuzzy-topk-three-arm-ladder.html) | 24 | 60M/125M/250M | dense vs fuzzy TopK vs double-fuzzy at matched active FLOPs | [`fuzzy-topk-three-arm-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-three-arm-ladder) |
 | [fuzzy-topk-sparsity-diagnostics](fuzzy-topk-sparsity-diagnostics.html) | 12 | 60M/125M/250M/500M | per-feature fuzzy TopK activity over training | [`fuzzy-topk-sparsity-diagnostics-ladder`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/fuzzy-topk-sparsity-diagnostics-ladder) |
+| [infinigram-distillation](infinigram-distillation.html) | 24 | 125M/500M | teacher samples K × mixture weight b; K=16 LR sweep; 20-TPP hero pair | [`infinigram-distillation`](https://huggingface.co/datasets/quintic/rig-logs/tree/main/infinigram-distillation) |
 | [transfer-charts](transfer-charts.html) | — | — | derived figures, not a run dashboard | — |
 
 Each study also carries a compact `snapshot.json.gz` (0.05–1.1 MB of thinned
-curves) and a full-resolution `full.json.gz` for the study browser's explicit
+curves) and an expanded `full.json.gz` for the study browser's explicit
 full-view action. Some studies carry a separate diagnostic snapshot. The
 compact snapshots are what the browser and derived visualizations load before
-anything larger.
+anything larger. The browser additionally retains the three branch-sealed
+fuzzy intervention studies—balance/homeostasis, ghost-AuxK, and train-only
+reconstruction—even though their focused reports are not duplicated on
+`main`.
 
 ---
 
@@ -819,6 +842,54 @@ and
 The archived records retain the final 500M seed's notebook-dependency-only
 `pyproject.toml`/`uv.lock` dirt; trainer, shared tree, config, data, runtime, and
 topology identities are unchanged.
+
+## infinigram-distillation.html
+
+Twenty-four complete runs test leave-one-out infinigram targets at 8k context:
+22 treatments at 125M, a matched 500M/20-TPP dense–treatment hero pair, and the
+exact 125M dense control imported from the earlier three-arm ladder. The 23 new
+runs all pass `rig verify`; the imported control's five published artifacts
+match its source ledger byte-for-byte. Its original stdout/stderr were never
+part of the public archive, so it cannot independently satisfy a fresh verifier
+that requires those files. That limitation is recorded rather than silently
+reclassifying the control.
+
+For each training position, the CPU teacher finds the longest suffix match in
+a 7.9B-token FineWeb training-only index, subtracts the position's observed
+continuation once, and samples `K` adjusted continuations with replacement.
+The student minimizes
+`(a+b) logsumexp(logits) - a logit[y] - (b/K) sum(logit[t_j])`, with `a+b=1`.
+Thus K changes only the Monte Carlo variance of the same teacher term; it does
+not change its expected weight. Counter-based random draws depend on run seed,
+optimizer step, process index, rank-local flattened token position, and sample
+ordinal, so host thread timing cannot alter targets for a fixed topology. The
+report gives the exact index layout,
+query proof, RNG constants, tiled vocabulary kernel, backward formula, hashes,
+and integration boundaries needed to reconstruct the unmerged research code.
+
+At 125M/5 TPP, the first `K=1,b=0.1` result improves on the dense endpoint by
+only 0.000524 nats (0.0144%, or 0.042 historical dense-seed SD): directionally
+positive but experimentally negligible. The other K=1 weights are worse.
+The full `K={16,32,64}` × `b={0.025,0.05,0.1}` grid is monotone in the wrong
+direction along both axes; even the best cell, `K=16,b=0.025`, is 0.011926
+nats worse than dense. Raising the K=16 base learning rate from 1× to
+1.25×, 1.5×, or 2× never improves the same-b endpoint.
+
+The decisive 500M/20-TPP pair also rejects the apparent K=1 signal: the
+treatment finishes at 2.919316 versus 2.901681 validation loss for dense,
+worse by 0.017635 nats (0.6077%) and 1.7791% in perplexity. It processes
+238,691 versus 244,915 tokens/s, a 2.54% throughput cost, and takes 17.84
+minutes longer. This is a single paired seed, so it provides no variance
+estimate, but it does show that the tiny 125M sign did not transfer to the
+longer, larger run. The mixed treatment training loss is not compared with
+dense training CE; only canonical ground-truth validation is used.
+
+The implementation is preserved on research commit
+`5f0fa99f7b3b8ad30190e854d52253bd69ce7b7f`; its relevant tests pass 19/19,
+and the patched upstream query tests pass 69/69. `main` intentionally receives
+only this report, the catalog, and the generated study browser. The 47.74-GB
+index and trainer code are not merged; exact source hashes and the two minimal
+upstream patches are documented in the report and run ledgers.
 
 ## transfer-charts.html
 

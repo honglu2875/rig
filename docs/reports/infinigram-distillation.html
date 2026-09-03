@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Leave-one-out infinigram distillation — implementation and results</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark;--bg:#faf9f6;--paper:#fff;--ink:#202124;--muted:#62656a;--line:#d8d5cf;--soft:#f1efe9;--accent:#315f8d;--good:#176b47;--bad:#9a3b32;--code:#f4f2ed}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1117;--paper:#151922;--ink:#edf0f4;--muted:#a6adb8;--line:#343b47;--soft:#1d232e;--accent:#8abbea;--good:#83d6ad;--bad:#f3a099;--code:#1b2029}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.58}main{max-width:1120px;margin:0 auto;padding:42px 28px 80px}header{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:30px}h1{font-size:clamp(1.8rem,4vw,2.55rem);line-height:1.15;letter-spacing:-.025em;margin:0 0 10px}h2{font-size:1.38rem;margin:42px 0 13px;padding-top:4px;border-top:1px solid var(--line)}h3{font-size:1.06rem;margin:28px 0 8px}p{max-width:88ch;margin:9px 0}.lede{font-size:1.08rem;color:var(--muted);max-width:82ch}.meta{display:flex;gap:8px 18px;flex-wrap:wrap;color:var(--muted);font-size:.86rem;margin-top:16px}.decision{border-left:4px solid var(--bad);background:var(--soft);padding:14px 17px;margin:20px 0}.decision p{margin:0;max-width:none}.note{border-left:3px solid var(--accent);padding:8px 14px;color:var(--muted);margin:16px 0}.good{color:var(--good)}.bad{color:var(--bad)}a{color:var(--accent)}code,kbd,pre,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}code{font-size:.91em;background:var(--code);padding:.08em .28em;border-radius:3px}pre{background:var(--code);border:1px solid var(--line);padding:14px 16px;border-radius:6px;overflow:auto;font-size:.82rem;line-height:1.5}pre code{background:transparent;padding:0}.equation{background:var(--paper);border:1px solid var(--line);padding:14px 18px;margin:14px 0;overflow:auto;font:1rem/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px;margin:14px 0 20px;background:var(--paper)}table{width:100%;border-collapse:collapse;font-size:.84rem;white-space:nowrap}th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line)}th{background:var(--soft);color:var(--muted);font-size:.75rem;letter-spacing:.02em;position:sticky;top:0}th:first-child,td:first-child{text-align:left}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:color-mix(in srgb,var(--soft) 70%,transparent)}td.wrap{white-space:normal;text-align:left;min-width:280px}.matrix td.best{color:var(--good);font-weight:700}.matrix td.worse{color:var(--bad)}ul,ol{max-width:88ch;padding-left:25px}li{margin:5px 0}.toc{columns:2;column-gap:36px;font-size:.9rem}.toc li{break-inside:avoid}.small{font-size:.82rem;color:var(--muted)}details{border:1px solid var(--line);border-radius:6px;background:var(--paper);margin:14px 0}summary{cursor:pointer;padding:11px 14px;font-weight:650}details>div{padding:0 14px 14px}.run-table code{background:transparent;padding:0;font-size:.78rem}.run-table td{vertical-align:top}.run-table td:nth-child(2){text-align:left}.footer{border-top:1px solid var(--line);margin-top:45px;padding-top:18px;color:var(--muted);font-size:.82rem}@media(max-width:700px){main{padding:26px 15px 55px}.toc{columns:1}th,td{padding:7px 8px}.equation{font-size:.82rem}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Leave-one-occurrence-out infinigram distillation</h1>
+  <p class="lede">A reconstruction specification and comparison record for a sampled suffix-array teacher on FineWeb. The experimental implementation is deliberately not merged; this document defines the change closely enough to rebuild it on top of the dense reference trainer.</p>
+  <div class="meta"><span>sealed 3 September 2026</span><span>125M / 5 TPP and 500M / 20 TPP</span><span>24 archived runs</span><span>TPU v4-32</span><span>all scientific comparisons use seed 1337</span></div>
+</header>
+
+<div class="decision"><p><strong>Decision.</strong> Do not land the infinigram trainer, ngram patches, or sampled-output kernel. The only development point to reach its paired dense endpoint was K=1, b=0.10, by -0.000524 nats; that is only 0.042 times the historical three-seed dense sample SD. Every larger-K cell lost to dense, every learning-rate increase hurt every tested K=16 coefficient, and the predeclared 500M/20-TPP treatment finished +0.017635 nats worse than its newly trained matched control. The raw evidence is retained so the idea can be revisited without preserving this code on <code>main</code>.</p></div>
+
+<ol class="toc">
+  <li><a href="#scope">Scope and evidence boundary</a></li>
+  <li><a href="#objective">Objective and estimator</a></li>
+  <li><a href="#teacher">Teacher index and leave-one-out query</a></li>
+  <li><a href="#rng">Sampling and determinism</a></li>
+  <li><a href="#kernel">Student loss and custom gradient</a></li>
+  <li><a href="#integration">Trainer integration</a></li>
+  <li><a href="#settings">Matched training contracts</a></li>
+  <li><a href="#results">Comparison results</a></li>
+  <li><a href="#systems">Systems measurements</a></li>
+  <li><a href="#reconstruct">Reconstruction instructions</a></li>
+  <li><a href="#archive">Archive, provenance, and exclusions</a></li>
+</ol>
+
+<section id="scope">
+<h2>Scope and evidence boundary</h2>
+<p>The question was whether an on-disk infinigram could act as a useful training target without transferring a full vocabulary distribution. The work proceeded adaptively, but each individual grid was frozen before its cells ran.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>phase</th><th>fixed setting</th><th>varied</th><th>new full runs</th><th>reason for next phase</th></tr></thead>
+<tbody>
+<tr><td>K=1 coefficient screen</td><td>125M, 8k, 5 TPP, LR 2<sup>-8</sup>, seed 1337</td><td>b={0.10, 0.25, 0.50}; a=1-b</td><td>3</td><td>b=0.10 nearly tied its imported dense control; larger b was worse.</td></tr>
+<tr><td>K × b grid</td><td>same model, horizon, LR, seed</td><td>K={16,32,64}; b={0.025,0.05,0.10}</td><td>9</td><td>More samples worsened all three rows; K=16 was least bad.</td></tr>
+<tr><td>K=16 LR grid</td><td>same model, horizon, seed; reuse the three 1.0× cells</td><td>LR multiplier={1.25,1.5,2}; same three b</td><td>9</td><td>Every LR increase was worse; no retuning rescue was observed.</td></tr>
+<tr><td>scaling pair</td><td>500M, 8k, 20 TPP, seed 1337</td><td>dense versus K=1,b=0.10</td><td>2</td><td>The treatment was worse at the larger, longer predeclared test.</td></tr>
+</tbody></table></div>
+<p>The archive contains those 23 new scientific runs plus the exact 125M dense seed-1337 run used throughout, copied from its earlier sealed study. All treatment grids and the 500M pair have one seed. The three historical 125M dense seeds quantify ordinary endpoint scale only; they do not form a paired treatment variance estimate or a confidence interval. There is no corresponding 500M seed cohort, so the hero result has no across-seed uncertainty estimate.</p>
+<p>Validation was a single deterministic endpoint evaluation on 1,048,576 held-out FineWeb tokens. There were no intermediate validation probes. Training losses across arms are not directly comparable because treatment logs contain the mixed objective while dense logs contain ground-truth cross-entropy. Claims about early or late validation separation cannot be made from these runs.</p>
+</section>
+
+<section id="objective">
+<h2>Objective and estimator</h2>
+<p>For position i, let c<sub>i</sub> be the model-visible context, y<sub>i</sub> the observed continuation, h<sub>i</sub> the final normalized student state, E<sub>v</sub> output row v, and ℓ<sub>iv</sub>=h<sub>i</sub><sup>T</sup>E<sub>v</sub>. The semantic vocabulary has V=50,257 entries. The teacher is the adjusted suffix distribution q<sub>i</sub><sup>LOO</sup>. Draw K independent targets with replacement:</p>
+<div class="equation">t<sub>ij</sub> ~ q<sub>i</sub><sup>LOO</sup>(· | c<sub>i</sub>),     j=1,…,K.
+
+L<sub>i</sub> = (a+b) log Σ<sub>v&lt;V</sub> exp ℓ<sub>iv</sub>
+      − a ℓ<sub>i,yᵢ</sub> − (b/K) Σ<sub>j=1..K</sub> ℓ<sub>i,tᵢⱼ</sub>,
+
+a ≥ 0, b ≥ 0, a+b = 1.</div>
+<p>The trainer rejects coefficients that do not sum to one within absolute tolerance 10<sup>-12</sup>. When only <code>--infinigram-weight b</code> is supplied it sets a=1-b. Conditional on the context and adjusted counts,</p>
+<div class="equation">E[L<sub>i</sub>] = a CE(δ<sub>yᵢ</sub>, p<sub>θ</sub>) + b CE(q<sub>i</sub><sup>LOO</sup>, p<sub>θ</sub>),
+
+Var[(1/K) Σ<sub>j</sub> −log p<sub>θ</sub>(t<sub>ij</sub>)] = Var[−log p<sub>θ</sub>(t)] / K.</div>
+<p>Thus K changes Monte Carlo variance, not the expected teacher objective. The teacher sample is a stopped, host-produced integer target: no gradient is taken through the suffix search, counts, or draw. Because a+b=1, the log-normalizer coefficient and broad softmax gradient scale match ordinary cross-entropy.</p>
+</section>
+
+<section id="teacher">
+<h2>Teacher index and leave-one-out query</h2>
+<h3>Index contents and layout</h3>
+<p>The index was built only from the 79 training files in the pinned <code>fineweb-8b-gpt2</code> manifest. Their SHA-256 values were verified before indexing. The separate 100M-token validation file was not indexed.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>property</th><th>value</th></tr></thead>
+<tbody>
+<tr><td>upstream</td><td class="wrap"><code>https://github.com/honglu2875/ngram</code> at <code>2a73b5ffbe852718dbd4e01ee6abafeb1628c5a7</code></td></tr>
+<tr><td>format</td><td><code>ngram-sa-v1</code>, memory-mapped</td></tr>
+<tr><td>corpus</td><td>7,900,000,000 tokens; 11,320,662 documents; GPT-2 token IDs</td></tr>
+<tr><td>shards</td><td>4,000,000,000 tokens / 5,736,269 docs and 3,900,000,000 tokens / 5,584,393 docs</td></tr>
+<tr><td>storage</td><td>u16 tokens, 4-byte suffix-array pointers, pivot length 8, pivot stride 512</td></tr>
+<tr><td>boundaries</td><td>document prefix/reset token 50,256; <code>insert_sep=false</code></td></tr>
+<tr><td>vocabulary</td><td>50,257</td></tr>
+<tr><td>physical size</td><td>47,738,502,730 bytes (44.46 GiB; <code>du -sh</code> reports 45G)</td></tr>
+<tr><td>original path</td><td><code>/home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1</code> on each TPU VM</td></tr>
+</tbody></table></div>
+<p>The two token arrays occupy 15.8 GB and the two suffix-array tables 31.6 GB; bucket and offset tables account for the remainder. Index construction is resumable. The 4.0B-token shard size keeps each suffix-array pointer within 32 bits. The second K-sample patch changes query code only and does not change this disk format.</p>
+
+<h3>Exact adjustment</h3>
+<p>For a candidate suffix s of length m, define c<sub>m</sub>(v) as the number of indexed occurrences of s that have successor v. A suffix occurrence at the final token of an index shard has no successor and is excluded. Let A<sub>m</sub>=Σ<sub>v</sub>c<sub>m</sub>(v), O<sub>m</sub>=c<sub>m</sub>(y<sub>i</sub>), and e<sub>m</sub>=1[O<sub>m</sub>&gt;0]. The training teacher is</p>
+<div class="equation">q<sub>i,m</sub><sup>LOO</sup>(v) = [c<sub>m</sub>(v) − e<sub>m</sub> 1(v=y<sub>i</sub>)] / (A<sub>m</sub>−e<sub>m</sub>).</div>
+<p>This removes one matching occurrence rather than deleting the whole ground-truth token type. If the queried sequence is not present in the index and O<sub>m</sub>=0, nothing is subtracted. If A<sub>m</sub>−e<sub>m</sub>=0, the query backs off. Length zero is the final corpus-frequency fallback; an empty adjusted corpus is a hard error.</p>
+<pre><code>for each batch row r:
+    split [0, T) into segments at every x[r,t] == 50256
+    # the old segment ends before EOT; the new segment begins with EOT
+    for each segment [begin, end), in a 30-thread host pool:
+        previous_length = 0
+        for t in range(begin, end):
+            cap = t - begin + 1
+            if max_context &gt; 0: cap = min(cap, max_context)
+            m = min(previous_length + 1, cap)
+            loop:
+                suffix = x[r, t+1-m : t+1]
+                ranges = suffix_array_find_in_every_shard(suffix)
+                A = count_occurrences_with_a_successor(ranges, m)
+                O = count_matches(suffix + [y[r,t]], restricted_to=ranges)
+                e = 1 if O &gt; 0 else 0
+                if A &gt; e: break
+                if m == 0: fail("empty leave-one-out corpus")
+                m -= 1
+
+            state = batch_seed XOR (0x9e3779b97f4a7c15 * (r*T+t+1))
+            repeat K times:
+                loop:
+                    occurrence = splitmix64(state) modulo A
+                    sampled = successor_of_occurrence(occurrence)
+                    if e == 0 or sampled != y[r,t]: accept
+                    elif splitmix64(state) modulo O != 0: accept
+                    # otherwise reject and redraw
+                targets[r,t,j] = sampled
+            suffix_length[r,t] = m
+            prompt_count[r,t] = A-e
+            truth_count[r,t] = O-e
+            previous_length = m</code></pre>
+<p>Starting from <code>previous_length+1</code> is exact: an adjacent suffix match can grow by at most one, and if a longer prior suffix became empty only because its sole observed continuation was removed, its one-token extension cannot acquire a second occurrence. Uniform occurrence sampling followed by rejection of a sampled ground-truth continuation with probability 1/O gives accepted aggregate mass O-1 for that token and unchanged mass for every other token, exactly implementing the equation above.</p>
+</section>
+
+<section id="rng">
+<h2>Sampling and determinism</h2>
+<p>The Python trainer computes one unsigned 64-bit seed for each rank-local optimizer batch. Arithmetic wraps modulo 2<sup>64</sup>:</p>
+<pre><code>z = uint64(run_seed)
+z ^= uint64(step)          * 0xD1B54A32D192ED03
+z ^= uint64(process_index) * 0x94D049BB133111EB
+z += 0x9E3779B97F4A7C15
+z = (z ^ (z &gt;&gt; 30)) * 0xBF58476D1CE4E5B9
+z = (z ^ (z &gt;&gt; 27)) * 0x94D049BB133111EB
+batch_seed = z ^ (z &gt;&gt; 31)</code></pre>
+<p>The C++ engine xors this with the position-specific golden-ratio multiple shown in the query pseudocode, then uses the standard SplitMix64 state transition for each occurrence draw and possible rejection draw. Each position owns its state, so thread scheduling cannot change samples. Within one position, K samples are sequential draws with replacement. Therefore fixed-seed K=16 targets are byte-for-byte prefixes of K=32 and K=64 targets. Changing b or the student learning rate does not change teacher targets because the model is never consulted by the query.</p>
+<p>Data order itself is the dense trainer's deterministic <code>shuffled_epochs</code> stream. Four JAX processes construct the same global permutation and take disjoint rank slices. The 125M horizon consumes 0.078129 of the available training tokens. The 500M horizon consumes about 1.2724 corpus epochs and begins a newly seeded shuffled epoch after exhausting the first; leave-one-out still removes one occurrence from the fixed teacher corpus at each visit.</p>
+</section>
+
+<section id="kernel">
+<h2>Student loss and custom gradient</h2>
+<p>The dense model has untied input and output embeddings. The historical function name contains “tied,” but the modified primitive receives the actual output table E of shape [50,304,D]. Rows 50,257–50,303 exist only for storage alignment and are assigned neither probability nor gradient. The loss uses a vocabulary tile of 2,048, BF16 matrix operands, and FP32 dot accumulation, online log-sum-exp, probabilities, gradient accumulators, and final mean.</p>
+
+<h3>Forward pass</h3>
+<ol>
+<li>Flatten h from [B,T,D] to [N,D]. Pad E to a whole number of 2,048-row tiles.</li>
+<li>Walk every vocabulary tile once. Compute [N,2,048] logits and an online FP32 maximum/exponential sum, masking non-semantic rows to negative infinity.</li>
+<li>Gather E[y] and compute the primary target logit with an FP32-accumulating dot.</li>
+<li>Loop over the static sample dimension. At each j, gather only E[t<sub>j</sub>] with shape [N,D], dot with h, and add to one [N] accumulator. Divide by K.</li>
+<li>Return the per-position equation above and mean in FP32.</li>
+</ol>
+<p>This does not materialize [N,V] logits, a dense teacher vector, or [N,K,D]. The forward teacher work is K gathered row dots, O(NKD), while the shared normalizer remains one O(NVD) tiled projection.</p>
+
+<h3>Backward pass</h3>
+<p>Let g<sub>i</sub> be the upstream cotangent after the final mean. The exact logit derivative is</p>
+<div class="equation">∂L/∂ℓ<sub>iv</sub> = g<sub>i</sub>[(a+b)p<sub>iv</sub> − a·1(v=y<sub>i</sub>) − (b/K)Σ<sub>j</sub>1(v=t<sub>ij</sub>)] .</div>
+<p>The custom VJP recomputes one vocabulary tile at a time. Each tile contributes the softmax term and primary correction to ∂h and the dense output-table gradient. For K=1 it also compares the one teacher ID inside that tile, preserving the original dual-target path exactly. For K&gt;1 it omits teacher-ID comparisons from the vocabulary loop, then applies the sparse correction in chunks of eight samples:</p>
+<div class="equation">Δ(∂h<sub>i</sub>) = −g<sub>i</sub>(b/K) Σ<sub>j</sub>E<sub>tᵢⱼ</sub>
+
+Δ(∂E<sub>tᵢⱼ</sub>) += −g<sub>i</sub>(b/K) h<sub>i</sub>.</div>
+<p>Targets are clipped only to make invalid-gather behavior defined; any invalid active target makes the forward loss infinite and zeroes that position's backward cotangent. K is padded to a whole number of chunks when necessary, and a validity mask zeroes padded samples. The largest teacher-specific live array is [N,8,D]. A naïve [N,K,D] tensor and the even larger [N,K,V] comparison are explicitly absent. The softmax makes the final output-table gradient dense regardless of sparse teacher corrections.</p>
+<p>The K&gt;1 implementation was refined through three rejected physical paths—dense K-by-vocabulary comparisons, a broad scatter formulation, and larger gathered target materializations—before the chunk-eight sparse correction above. These were implementation changes only; unit tests checked the same loss and gradients against dense reference formulas.</p>
+</section>
+
+<section id="integration">
+<h2>Trainer integration</h2>
+<p>The recipe copied the dense reference <code>train.py</code>; its three YAML documents were byte-identical to <code>recipes/reference/{config,dev,smoke}.yaml</code>. No transformer layer, initialization, optimizer, data stream, attention kernel, masking rule, evaluation, logging cadence, or checkpoint rule was intentionally changed.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>surface</th><th>reconstruction requirement</th></tr></thead>
+<tbody>
+<tr><td>arguments</td><td class="wrap"><code>--ground-truth-weight</code> optional; <code>--infinigram-weight</code> default 0; <code>--infinigram-samples</code> positive integer default 1; <code>--infinigram-index</code> required only for b&gt;0; <code>--infinigram-manifest</code> defaults to the FineWeb 8B manifest; <code>--infinigram-max-context</code> optional positive cap, with internal 0 meaning unbounded; <code>--infinigram-threads</code> positive integer default 30.</td></tr>
+<tr><td>validation</td><td class="wrap">Require finite nonnegative a,b and a+b=1; reject an index omission for b&gt;0; reject max-context or K≠1 as meaningless for b=0.</td></tr>
+<tr><td>index admission</td><td class="wrap">Require the loaded train filenames and token count to equal the manifest; provenance schema 1, format <code>ngram-sa-v1</code>, verified source hashes, matching manifest/base-patch/upstream revision, GPT-2 tokenizer, EOT 50256, vocabulary ≤50,257, exactly 7.9B tokens, complete shard inventory, and the K-sample API.</td></tr>
+<tr><td>host step</td><td class="wrap">Fetch the same local [B,T] x/y batch as dense; when b&gt;0 query [B,T,K] int32 teacher IDs and four [B,T] statistics; include query, transfer, dispatch, and logging synchronization inside <code>train_seconds</code>.</td></tr>
+<tr><td>device sharding</td><td class="wrap">Replicate parameters/optimizer; shard x and y as <code>P("data",None)</code>; shard teacher IDs as <code>P("data",None,None)</code>. On v4-32, global B=16 gives local B=4 on each of four processes.</td></tr>
+<tr><td>JIT paths</td><td class="wrap">Compile separate b=0 call signatures with no teacher argument and b&gt;0 signatures with the teacher array, for both ordinary and diagnostic updates. The dense branch calls the unchanged tiled cross-entropy primitive.</td></tr>
+<tr><td>evaluation</td><td class="wrap">Never load or query the teacher. Use the unchanged ground-truth loss and deterministic validation prefix.</td></tr>
+<tr><td>metadata</td><td class="wrap">Record coefficients, K, max context, query totals/rates, suffix lengths, adjusted truth probability, sample/truth match rate, index/patch/runtime hashes, and source identities in <code>result.json</code> and the harness ledger.</td></tr>
+</tbody></table></div>
+<p>At b=0 the loader immediately returns <code>(None,None)</code>; there is no index mmap, host query, teacher allocation, or weighted-loss call. This property makes the 500M dense arm an exact in-recipe control. The imported 125M dense arm came from the reference recipe at a different clean source commit, so its equality is contractual rather than a same-binary rerun; configuration hash, model, seed, data, topology, token budget, and validation set match.</p>
+</section>
+
+<section id="settings">
+<h2>Matched training contracts</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>coordinate</th><th>125M screen/grids</th><th>500M pair</th></tr></thead>
+<tbody>
+<tr><td>architecture</td><td>12 layers, D=640, 10 heads, 4D GELU MLP</td><td>19 layers, D=1,280, 20 heads, 4D GELU MLP</td></tr>
+<tr><td>exact parameters</td><td>123,456,640</td><td>502,602,240</td></tr>
+<tr><td>shared model choices</td><td colspan="2">64-wide heads; pre-RMSNorm; RoPE base 10,000; untied 50,304-row embeddings; semantic vocabulary 50,257; BF16 training</td></tr>
+<tr><td>context / batch</td><td colspan="2">8,192 tokens; global sequence batch 16; 131,072 tokens/step; EOT-aware document masking</td></tr>
+<tr><td>steps / tokens</td><td>4,709 / 617,218,048</td><td>76,691 / 10,052,042,752</td></tr>
+<tr><td>realized TPP</td><td>4.9994722682</td><td>19.9999959252</td></tr>
+<tr><td>base LR anchor</td><td colspan="2">0.00390625 (2<sup>-8</sup>)</td></tr>
+<tr><td>effective peak at anchor</td><td>0.0027213363</td><td>0.0013487369</td></tr>
+<tr><td>schedule</td><td>471-step warmup</td><td>7,669-step warmup</td></tr>
+<tr><td>optimizer</td><td colspan="2">CompleteP fixed-TPP hybrid, α=1; PyTorch-form AdamW; base β₁=0.9, β₂=0.95, ε=10<sup>-8</sup>, weight decay=0.1; cosine decay to 10% of peak; no global gradient clipping</td></tr>
+<tr><td>attention / output</td><td colspan="2">trainable TPU flash attention; tiled output cross-entropy; vocabulary tile 2,048</td></tr>
+<tr><td>validation</td><td colspan="2">8 batches / 1,048,576 predictions from the deterministic FineWeb validation prefix; final only; ground-truth CE</td></tr>
+<tr><td>logging</td><td colspan="2">training scalar record every optimizer step; parameter/gradient/update diagnostics at step 1, every 10 steps, and final; no activation vectors; no checkpoints</td></tr>
+<tr><td>hardware</td><td colspan="2">16 TPU v4 chips, four VMs/processes, four local chips each; Python 3.12.13; JAX/JAXlib 0.11.0; libtpu 0.0.44.1</td></tr>
+</tbody></table></div>
+<p>CompleteP's horizon scaling changes the effective optimizer coefficients as well as the global peak LR. At the anchor the recorded effective β values are 0.9514662/0.9757331 for 125M and 0.9880784/0.9940392 for 500M. All comparisons remain within tier and horizon, so these transformations are held fixed.</p>
+</section>
+
+<section id="results">
+<h2>Comparison results</h2>
+<h3>K=1 coefficient screen</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>arm</th><th>a</th><th>b</th><th>validation loss</th><th>Δ vs dense</th><th>relative Δ</th><th>perplexity</th><th>token/s</th></tr></thead>
+<tbody>
+<tr><td>dense</td><td>1</td><td>0</td><td><strong>3.6415286660</strong></td><td>—</td><td>—</td><td>38.150111</td><td>818,612</td></tr>
+<tr><td>K=1</td><td>0.90</td><td>0.10</td><td class="good"><strong>3.6410042346</strong></td><td>-0.0005244315</td><td>-0.0144%</td><td>38.130109</td><td>748,175</td></tr>
+<tr><td>K=1</td><td>0.75</td><td>0.25</td><td>3.6787851155</td><td class="bad">+0.0372564495</td><td>+1.0231%</td><td>39.598258</td><td>745,868</td></tr>
+<tr><td>K=1</td><td>0.50</td><td>0.50</td><td>3.7929647565</td><td class="bad">+0.1514360905</td><td>+4.1586%</td><td>44.387804</td><td>744,935</td></tr>
+</tbody></table></div>
+<p>The exact historical dense seed losses are 3.6415286660, 3.6577665210, and 3.6660490036. Their mean is 3.6551147302, sample SD 0.0124734011, and range 0.0245203376. The K=1/b=0.10 difference is -0.0420 sample-SD units. That SD is merely magnitude context from three dense seeds: there are no same-seed treatment differences from which to estimate paired uncertainty.</p>
+
+<h3>Teacher sample count by coefficient</h3>
+<p>The following cells all use base LR 0.00390625. Parentheses show loss minus the same seed-1337 dense endpoint.</p>
+<div class="table-wrap"><table class="matrix">
+<thead><tr><th>K</th><th>b=0.025</th><th>b=0.05</th><th>b=0.10</th><th>full-run token/s</th><th>query positions/s</th></tr></thead>
+<tbody>
+<tr><td>16</td><td class="best">3.653455079 (+0.011926)</td><td class="worse">3.670623511 (+0.029095)</td><td class="worse">3.707323402 (+0.065795)</td><td>701,472–703,112</td><td>1.254–1.268M</td></tr>
+<tr><td>32</td><td class="worse">3.665286154 (+0.023757)</td><td class="worse">3.696929067 (+0.055400)</td><td class="worse">3.749260515 (+0.107732)</td><td>669,021–672,148</td><td>1.171–1.181M</td></tr>
+<tr><td>64</td><td class="worse">3.673222303 (+0.031694)</td><td class="worse">3.706024885 (+0.064496)</td><td class="worse">3.761991590 (+0.120463)</td><td>619,777–621,527</td><td>1.048–1.057M</td></tr>
+</tbody></table></div>
+<p>The surface is monotone in both tested directions: more teacher weight hurts at fixed K, and more samples hurt at fixed b. Since K samples are an unbiased estimator with lower conditional Monte Carlo variance and are nested across K, this is evidence against “the K=1 target was simply too sparse/noisy” as the explanation for the screen. It does not prove that every use of a fuller infinigram distribution is harmful; it applies to this same-corpus leave-one-out teacher, coefficient range, model, and optimizer.</p>
+
+<h3>K=16 learning-rate surface</h3>
+<p>The 1.0× row is reused from the K×b grid; the remaining nine runs were launched only after that grid finished.</p>
+<div class="table-wrap"><table class="matrix">
+<thead><tr><th>base LR</th><th>multiplier</th><th>effective peak</th><th>b=0.025</th><th>b=0.05</th><th>b=0.10</th></tr></thead>
+<tbody>
+<tr><td>0.0039062500</td><td>1.00×</td><td>0.0027213363</td><td class="best">3.653455079</td><td class="best">3.670623511</td><td class="best">3.707323402</td></tr>
+<tr><td>0.0048828125</td><td>1.25×</td><td>0.0034016704</td><td>3.660931557</td><td>3.679066092</td><td>3.717052847</td></tr>
+<tr><td>0.0058593750</td><td>1.50×</td><td>0.0040820045</td><td class="worse">3.716396779</td><td class="worse">3.725556761</td><td class="worse">3.739456743</td></tr>
+<tr><td>0.0078125000</td><td>2.00×</td><td>0.0054426726</td><td class="worse">3.724212170</td><td class="worse">3.753610313</td><td class="worse">3.801401615</td></tr>
+</tbody></table></div>
+<p>Every higher LR is worse than 1.0× for every b. The 1.25× degradation is already consistent across the row, and the larger increases are substantial. Because LR changes no query or tensor shape and throughput stays 699–704k token/s, this pattern is not a compile, memory, or input-starvation failure.</p>
+
+<h3>500M, 20-TPP pair</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>metric</th><th>dense</th><th>K=1, a=0.90, b=0.10</th><th>treatment difference</th></tr></thead>
+<tbody>
+<tr><td>canonical FineWeb loss</td><td><strong>2.9016812742</strong></td><td>2.9193160236</td><td class="bad">+0.0176347494 (+0.607742%)</td></tr>
+<tr><td>canonical perplexity</td><td><strong>18.20472679</strong></td><td>18.52860999</td><td class="bad">+0.32388320 (+1.779116%)</td></tr>
+<tr><td>training throughput</td><td>244,915.218 token/s</td><td>238,690.618 token/s</td><td>-2.541532%</td></tr>
+<tr><td>synchronized train time</td><td>41,042.949 s</td><td>42,113.271 s</td><td>+1,070.322 s (+17.84 min)</td></tr>
+</tbody></table></div>
+<p>The hero supplies no statistical significance claim because it has one seed. Its value is directional replication under a stronger predeclared setting: the development near-tie does not persist. Expressing the endpoint in relative cross-entropy and perplexity avoids treating 0.0176 nats as having the same practical scale at every baseline loss, but it does not replace a seed variance estimate.</p>
+</section>
+
+<section id="systems">
+<h2>Systems measurements and teacher diagnostics</h2>
+<p>Short 100-step gates at the exact 125M/8k shape were used to admit the sparse K-sample gradient before launching the grid. Against a 713,092 token/s K=1 gate, the final path measured 672,069 at K=16 (-5.75%), 625,342–639,694 at K=32 (-10.29% to -12.31%), and 599,760 at K=64 (-15.89%). Two independent K=32 launches had byte-identical training and diagnostic logs. These gates are listed under exclusions because their shortened horizons are systems evidence, not quality endpoints.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>K</th><th>full-run token/s</th><th>relative to imported 125M dense</th><th>query positions/s</th><th>teacher samples/s</th><th>query critical path</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>744,935–748,175</td><td>-8.60% to -9.00%</td><td>1.342–1.359M</td><td>same as positions</td><td>454–460 s</td></tr>
+<tr><td>16</td><td>699,127–703,626 across both grids</td><td>-14.0% to -14.6%</td><td>1.243–1.287M</td><td>19.89–20.59M</td><td>480–497 s</td></tr>
+<tr><td>32</td><td>669,021–672,148</td><td>-17.89% to -18.27%</td><td>1.171–1.181M</td><td>37.46–37.78M</td><td>523–527 s</td></tr>
+<tr><td>64</td><td>619,777–621,527</td><td>-24.08% to -24.29%</td><td>1.048–1.057M</td><td>67.05–67.62M</td><td>584–589 s</td></tr>
+<tr><td>1 at 500M</td><td>238,691</td><td>-2.54% to matched dense</td><td>1.348M</td><td>1.348M</td><td>7,457 s</td></tr>
+</tbody></table></div>
+<p>The teacher searches and counts once per position, then repeats only occurrence draws. K still costs device-side gathered target dots/corrections and transfers [B,T,K] IDs, so throughput falls with K even though teacher samples per second rises. At 500M, model computation dominates and the same K=1 host work is a smaller fraction of the step.</p>
+<p>All 125M treatments see the same contexts and report mean selected suffix length 13.22114153, maximum 8,192, and mean adjusted probability 0.240157845 on the observed token. The sampled match rates are 0.240160787 at K=1, 0.240157955 at K=16, 0.240157021 at K=32, and 0.240157320 at K=64. The 500M treatment reports mean length 13.36238627, maximum 8,192, mean ground-truth probability 0.239692472, and sample match rate 0.239694127. Agreement between analytic adjusted probability and empirical matches is a whole-run sampler check, not a quality result.</p>
+</section>
+
+<section id="reconstruct">
+<h2>Reconstruction instructions</h2>
+<p>The following is the durable specification. The unmerged research branch is useful for audit, but none of these steps require merging it into the baseline.</p>
+<ol>
+<li><strong>Fork the dense recipe.</strong> Copy the reference trainer and the three complete YAML files. Preserve all dense behavior. Add only the arguments, metadata, index loader, host query, teacher sharding, and weighted output loss described above. Keep a separately compiled b=0 branch that calls the original loss and never opens the index.</li>
+<li><strong>Prepare ngram.</strong> Clone upstream revision <code>2a73b5ffbe852718dbd4e01ee6abafeb1628c5a7</code>. Add a C++ engine method accepting equally shaped 2-D context/target arrays, K, max length, optional reset token, seed, and output buffers [rows,cols,K] plus three [rows,cols] statistic buffers. Implement the exact segment, search, count, backoff, rejection, and per-position RNG algorithm in this report. Expose it through the type-erased facade, Cython engine, and Python <code>InfiniGram.infgram_loo_sample_k_batch</code>. Retain a K=1 wrapper. Release the GIL around the C++ call and make arrays contiguous in the index token dtype.</li>
+<li><strong>Build the index.</strong> Validate all manifest file sizes/hashes. Call <code>ngram.build_index</code> with LLMC input, u16 tokens, <code>doc_sep_token=50256</code>, <code>insert_sep=False</code>, shard size 4,000,000,000, 240 CPU workers, 300 GiB memory budget, GPT-2 tokenizer metadata, resume enabled. Afterward require <code>ingest</code>, <code>sa.0000</code>, and <code>sa.0001</code> completion and write the attestation fields/hashes listed below.</li>
+<li><strong>Add the weighted tiled primitive.</strong> Give it hidden, output table, primary [..] IDs, teacher [..,K] IDs, a, b, semantic V, tile size, and compute dtype. Implement the forward and custom VJP exactly as in the preceding section, including semantic masking, invalid-target behavior, K=1 compatibility, chunk size eight, padding mask, FP32 accumulation, and mean reduction.</li>
+<li><strong>Query inside each timed training step.</strong> Query host-local x/y before device placement with seed <code>infinigram_step_seed(run_seed, step_index, jax.process_index())</code>. Convert IDs to contiguous int32, accumulate diagnostics, place with <code>P("data",None,None)</code>, and pass them to ordinary or diagnostic JIT. Keep query time inside synchronized <code>train_seconds</code>.</li>
+<li><strong>Keep validation pure.</strong> The evaluation executable accepts only params/x/y and calls ground-truth tiled CE. Do not report mixed-objective training loss as language-model validation.</li>
+<li><strong>Test before TPU use.</strong> Compare losses and gradients for K=1 and K&gt;1 with a dense softmax formula, include repeated target IDs, non-divisible storage vocab, semantic padding, invalid IDs, zero coefficient cases, BF16/FP32, JIT, and K-prefix behavior. On the ngram side compare adjusted counts and samples with a brute-force corpus, boundaries, shard tails, empty-backoff cases, empirical frequencies, determinism, and K=1/K-prefix compatibility.</li>
+</ol>
+
+<h3>Index attestation</h3>
+<pre><code>{
+  "schema_version": 1,
+  "index_format": "ngram-sa-v1",
+  "dataset_name": "fineweb-8b-gpt2",
+  "dataset_manifest_sha256": "d77eb50e311bd36b8a3fc3ec4da4c71c6b200c308167a3afcb3a27f75a430d52",
+  "source_hashes_verified": true,
+  "train_files": 79,
+  "train_tokens": 7900000000,
+  "documents": 11320662,
+  "index_shards": 2,
+  "ngram_upstream_revision": "2a73b5ffbe852718dbd4e01ee6abafeb1628c5a7",
+  "ngram_patch_sha256": "207ea29cc3b2a8f2c740034ad8e1b9b428380ecd2bb54b2e64b067fd48e7072b",
+  "index_config_sha256": "aec966542fd7ba6c1d88fa37285c5d746448c6f33389fe48437a5ba63056c76e"
+}</code></pre>
+
+<h3>Representative launch</h3>
+<pre><code>uv run --frozen --no-sync rig run infinigram_distillation \
+  --profile dev --tier 125m --context 8k \
+  --tokens-per-parameter 5 --batch-size 16 \
+  --base-learning-rate 0.00390625 --seed 1337 \
+  --checkpoint-policy none --name ksgrid-k16-b0025-s1337 -- \
+  --infinigram-weight 0.025 --infinigram-samples 16 \
+  --infinigram-index /home/cubic27/infinigram/fineweb-8b-gpt2-sa-v1 \
+  --infinigram-threads 30</code></pre>
+<p>Cluster orchestration used four TPU VMs and the harness-provided absolute output directory, run ID, distributed-process count, controller hostname, and isolated JAX compilation cache. Those operational variables do not alter the objective; each exact command, including all 79 train-file arguments, remains in the corresponding ledger entry.</p>
+
+<h3>Source and binary identities</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>cohort</th><th>clean Git HEAD</th><th>trainer SHA-256</th><th>loss-kernel SHA-256</th><th>ngram extension</th></tr></thead>
+<tbody>
+<tr><td>imported 125M dense</td><td><code>fe2bd0f28888103fb473d0d8f70cca144a5488e9</code></td><td><code>bdad3551bc1147fa0ce4f69d3faaa9b822bf9beff9442472d15e7f615f6af1cd</code></td><td><code>e0cbab4cda97a8f5878e0deaf0a573dd28cf76952a1226e8b3c6612e9d3d79b9</code></td><td>not loaded</td></tr>
+<tr><td>K=1 coefficient screen</td><td><code>bbb05b4fef3bfce427596b5ccb5aa4f52ba26704</code></td><td><code>3e531d750289459dbcf097da213a7d1e1e5807c08b2fe74095f4804dae96b5e6</code></td><td><code>98c4e27dfa739b027a4d7177d227831c32edd6ba9a3c04c8daa6f5c4a8af0351</code></td><td><code>fde2bac1b4c31156fd0faf5595f5378fc17de50b42b0f24582fabf5072b3c09a</code></td></tr>
+<tr><td>K×b grid</td><td><code>d1f6e0e4529af5a52f0a1f8e4cf86ae8ae7c5006</code></td><td><code>ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12</code></td><td><code>91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92</code></td><td><code>0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925</code></td></tr>
+<tr><td>K=16 LR grid</td><td><code>6d79d89ca1f30ad3691c9480f919d364f4873590</code></td><td><code>ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12</code></td><td><code>91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92</code></td><td><code>0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925</code></td></tr>
+<tr><td>500M pair</td><td><code>5f0fa99f7b3b8ad30190e854d52253bd69ce7b7f</code></td><td><code>ff2c230bbbceece6466c537bc1be5876acc3474d5049b9135b5812e1f9350c12</code></td><td><code>91cc346a3f24c8a960253fdabfa6171f487d655d932c078b603d33dbc15edb92</code></td><td>treatment: <code>0c43110113cd496e23a69a2289e6e7e1937052f704974cc7d934f68c67c3d925</code>; dense: not loaded</td></tr>
+</tbody></table></div>
+<p>The base leave-one-out patch is <code>207ea29cc3b2a8f2c740034ad8e1b9b428380ecd2bb54b2e64b067fd48e7072b</code>; the shared-query K-sample patch is <code>2fb075ba5536e79abcb0fca63e147551629448c1dd641291edc26ac18eafe015</code>. The final K-sample Python wrapper is <code>412056e0766040c1ac539228e067998c909cfa47fcc10966680b8f87a79baf33</code>; the original K=1 wrapper is <code>460ba0d6a1727d7eaec49f2a8bf3aa690d21a902579c390e37633a5860165a93</code>. Index provenance is <code>df3b9f30257927703022b105ca873aa22f9399e087a769a7eeff194660e39c75</code>. All cohorts use configuration SHA <code>fddf28d6b4903f9aac965fc39b069895fe6aa4f61c943ae3247fd66d1a00426f</code>, data-manifest SHA <code>d77eb50e311bd36b8a3fc3ec4da4c71c6b200c308167a3afcb3a27f75a430d52</code>, and lock SHA <code>394baf4835b9a61f240aca357ed00b2a407f17ab2e07084fe46a6391b6032b3c</code>.</p>
+<p>The branch history after main base <code>aed696d6b3ed9bbd15c14e0bc4c3161b8470fe12</code> is: initial K=1 implementation <code>bbb05b4</code>; K-sample extension <code>7670e1b</code>; gradient implementation refinements <code>66c0552</code>, <code>8e137d3</code>, and <code>7ffa37a</code>; frozen K grid <code>d1f6e0e</code>; LR protocol <code>6d79d89</code>; hero protocol <code>5f0fa99</code>. The focused ngram suite passes 69 tests; the recipe/output-kernel suite passes 19 tests. The research branch remains an audit convenience, but this report is the reconstruction contract.</p>
+</section>
+
+<section id="archive">
+<h2>Archive, provenance, and exclusions</h2>
+<p>The public package is <a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/infinigram-distillation">quintic/rig-logs/infinigram-distillation</a>. It has 24 run folders and a 24-line ledger. Every folder contains <code>training.riglog</code>, <code>diagnostics.riglog</code>, <code>validation.csv</code>, <code>metrics.json</code>, and <code>result.json</code>; there are no checkpoints or activation-vector logs. The 120 raw run artifacts total 42,197,078 bytes.</p>
+<p>The archive keeps a 121,182-byte overview capped at 200 points per run-series and four layer frames. Its 6,899,362-byte expanded browser payload is capped at 2,048 points per run-series and 32 layer frames. These are renderings only: the packed run logs retain every recorded scalar. The ledger SHA-256 is <code>6ba10b79daee431d4a05e28e25d06ecae4784cfd3cd538face5e97c416769e40</code>.</p>
+<p>All 23 locally produced scientific runs pass <code>rig verify</code>. The imported dense control had already passed verification in its source study. Because standard Hub archives omit captured stdout/stderr, it cannot be re-run through the complete verifier from the downloaded folder alone; instead, all five copied artifacts were checked for exact byte size and SHA-256 against the source ledger at immutable Hub revision <code>c0c8a21677de77b9e1058c00ac9c6ce856bb3f51</code>. Every one of the 24 source Git records says <code>dirty=false</code>.</p>
+
+<details open><summary>All 24 archived coordinates and immutable run IDs</summary><div class="table-wrap"><table class="run-table">
+<thead><tr><th>archive coordinate</th><th>original run ID</th><th>validation</th><th>source</th></tr></thead>
+<tbody>
+<tr><td><code>125m-dense-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260825T191108.183107Z-reference-gmax-ladder-125m-dense-s1337-605fe5eb</code></td><td>3.641528666</td><td><code>fe2bd0f</code></td></tr>
+<tr><td><code>125m-k1-b0p1-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260831T181950.761017Z-infinigram_distillation-infinigram-b010-s1337-ecaa22c4</code></td><td>3.641004235</td><td><code>bbb05b4</code></td></tr>
+<tr><td><code>125m-k1-b0p25-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260831T183550.129312Z-infinigram_distillation-infinigram-b025-s1337-07c6627e</code></td><td>3.678785115</td><td><code>bbb05b4</code></td></tr>
+<tr><td><code>125m-k1-b0p5-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260831T185150.764135Z-infinigram_distillation-infinigram-b050-s1337-b0a721ed</code></td><td>3.792964756</td><td><code>bbb05b4</code></td></tr>
+<tr><td><code>125m-k16-b0p025-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T094738.933157Z-infinigram_distillation-ksgrid-k16-b0025-s1337-01f16336</code></td><td>3.653455079</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k16-b0p05-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T100440.468330Z-infinigram_distillation-ksgrid-k16-b0050-s1337-8c2d152f</code></td><td>3.670623511</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k16-b0p1-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T102144.543909Z-infinigram_distillation-ksgrid-k16-b0100-s1337-8f94b71e</code></td><td>3.707323402</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k32-b0p025-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T103856.189991Z-infinigram_distillation-ksgrid-k32-b0025-s1337-d785ec46</code></td><td>3.665286154</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k32-b0p05-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T105702.757261Z-infinigram_distillation-ksgrid-k32-b0050-s1337-c1038458</code></td><td>3.696929067</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k32-b0p1-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T111506.131069Z-infinigram_distillation-ksgrid-k32-b0100-s1337-9f29374c</code></td><td>3.749260515</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k64-b0p025-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T113244.228654Z-infinigram_distillation-ksgrid-k64-b0025-s1337-ca956cdd</code></td><td>3.673222303</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k64-b0p05-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T115136.944117Z-infinigram_distillation-ksgrid-k64-b0050-s1337-faecb0cd</code></td><td>3.706024885</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k64-b0p1-lr0p00390625-5tpp-bs16-s1337</code></td><td><code>20260901T121025.531480Z-infinigram_distillation-ksgrid-k64-b0100-s1337-458e5454</code></td><td>3.761991590</td><td><code>d1f6e0e</code></td></tr>
+<tr><td><code>125m-k16-b0p025-lr0p0048828125-5tpp-bs16-s1337</code></td><td><code>20260901T151947.365941Z-infinigram_distillation-lrgrid-lr125-b0025-s1337-1b48cc31</code></td><td>3.660931557</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p05-lr0p0048828125-5tpp-bs16-s1337</code></td><td><code>20260901T153655.459137Z-infinigram_distillation-lrgrid-lr125-b0050-s1337-10a4abf5</code></td><td>3.679066092</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p1-lr0p0048828125-5tpp-bs16-s1337</code></td><td><code>20260901T155409.964244Z-infinigram_distillation-lrgrid-lr125-b0100-s1337-ac2f9159</code></td><td>3.717052847</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p025-lr0p005859375-5tpp-bs16-s1337</code></td><td><code>20260901T161110.986723Z-infinigram_distillation-lrgrid-lr150-b0025-s1337-8db92598</code></td><td>3.716396779</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p05-lr0p005859375-5tpp-bs16-s1337</code></td><td><code>20260901T162811.752693Z-infinigram_distillation-lrgrid-lr150-b0050-s1337-c6d28867</code></td><td>3.725556761</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p1-lr0p005859375-5tpp-bs16-s1337</code></td><td><code>20260901T164524.532048Z-infinigram_distillation-lrgrid-lr150-b0100-s1337-88fecb1f</code></td><td>3.739456743</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p025-lr0p0078125-5tpp-bs16-s1337</code></td><td><code>20260901T170233.372145Z-infinigram_distillation-lrgrid-lr200-b0025-s1337-320d7705</code></td><td>3.724212170</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p05-lr0p0078125-5tpp-bs16-s1337</code></td><td><code>20260901T171937.727116Z-infinigram_distillation-lrgrid-lr200-b0050-s1337-c9852d37</code></td><td>3.753610313</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>125m-k16-b0p1-lr0p0078125-5tpp-bs16-s1337</code></td><td><code>20260901T173636.655005Z-infinigram_distillation-lrgrid-lr200-b0100-s1337-69286999</code></td><td>3.801401615</td><td><code>6d79d89</code></td></tr>
+<tr><td><code>500m-dense-lr0p00390625-20tpp-bs16-s1337</code></td><td><code>20260902T093206.550888Z-infinigram_distillation-hero-500m-20tpp-dense-b000-s1337-f0eb1acf</code></td><td>2.901681274</td><td><code>5f0fa99</code></td></tr>
+<tr><td><code>500m-k1-b0p1-lr0p00390625-20tpp-bs16-s1337</code></td><td><code>20260901T214618.539494Z-infinigram_distillation-hero-500m-20tpp-k1-b010-s1337-76d84edb</code></td><td>2.919316024</td><td><code>5f0fa99</code></td></tr>
+</tbody></table></div></details>
+
+<details><summary>Fourteen local runs excluded from scientific comparisons</summary><div>
+<p>These runs remain local engineering evidence. They were not exported as full-quality observations because they are smoke wiring checks, stopped-prefix admission checks, or transient kernel benchmarks. No completed scientific endpoint was discarded.</p>
+<ul class="small">
+<li>CPU/v4 smoke: <code>20260831T144743.126545Z-infinigram_distillation-baseline-smoke-v4-68d588e8</code>; <code>20260831T145237.973666Z-infinigram_distillation-treatment-smoke-a22e71c8</code>.</li>
+<li>short admission prefixes: <code>20260831T181539.713984Z-infinigram_distillation-infinigram-b025-preflight-s1337-93004379</code>; <code>20260901T214128.595225Z-infinigram_distillation-hero-k1-b010-preflight-s1337-6fbf562c</code>.</li>
+<li>initial K paths: <code>20260901T090406.309816Z-infinigram_distillation-ksample-bench-k1-b010-e0151b21</code>; <code>20260901T090641.303681Z-infinigram_distillation-ksample-bench-k16-b010-06650735</code>; <code>20260901T090915.227583Z-infinigram_distillation-ksample-bench-k32-b010-ed8dc70d</code>; <code>20260901T091228.693898Z-infinigram_distillation-ksample-bench-k64-b010-288935ae</code>.</li>
+<li>gradient implementation gates: <code>20260901T091715.899862Z-infinigram_distillation-ksample-scatter-bench-k32-b010-c41d7374</code>; <code>20260901T092156.810379Z-infinigram_distillation-ksample-chunk8-bench-k32-b010-4053c768</code>; <code>20260901T092648.363019Z-infinigram_distillation-ksample-sparse-bench-k32-b010-4a4a2582</code>; <code>20260901T093406.589452Z-infinigram_distillation-ksample-sparse-repeat2-k32-b010-ef81f005</code>; <code>20260901T093654.555209Z-infinigram_distillation-ksample-sparse-bench-k64-b010-d047f27c</code>; <code>20260901T094008.770600Z-infinigram_distillation-ksample-sparse-bench-k16-b010-fd05b2cb</code>.</li>
+</ul>
+</div></details>
+
+<h3>What is and is not preserved</h3>
+<p>The public archive preserves every scientific training/diagnostic sample, exact endpoint, full resolved result object, ledger command, artifact hash, source hash, system topology, and this report's algorithmic specification. The 47.7GB index itself is not duplicated in the run archive; its source corpus contract, exact builder options, disk configuration, and provenance hashes are recorded so it can be rebuilt. The experimental Python/C++ code and patch files remain only on <code>research/infinigram-distillation-k-sweep</code> and are not merged to <code>main</code>.</p>
+<p>Use the <a href="study-browser.html">study browser</a> for bounded trajectory inspection. Download raw files from Hugging Face when exact per-step values matter.</p>
+</section>
+
+<div class="footer">Static report: system fonts, no runtime JavaScript, and no embedded raw logs. Exact data live in <a href="https://huggingface.co/datasets/quintic/rig-logs/tree/main/infinigram-distillation">the public archive</a>. The report and browser are the only infinigram artifacts intended for <code>main</code>.</div>
+</main>
+</body>
+</html>
